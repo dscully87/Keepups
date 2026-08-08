@@ -1,0 +1,15 @@
+{
+  "name": "project-kick-up",
+  "version": "1.0.0",
+  "description": "A mobile-web soccer keep-up game.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node tools/server.mjs 8080",
+    "gate:1": "node tools/gate1.mjs",
+    "gate": "node tools/gate1.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

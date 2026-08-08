@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0b1d33" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Project Kick-Up</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #08101c;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #hud {
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 18px);
+    left: 0; right: 0; text-align: center; pointer-events: none; color: #fff;
+  }
+  #score { font-size: 15vmin; font-weight: 800; line-height: 1; text-shadow: 0 4px 18px rgba(0,0,0,.55); }
+  #label { font-size: 3.4vmin; letter-spacing: .32em; opacity: .65; text-transform: uppercase; }
+  #hint {
+    position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+    left: 0; right: 0; text-align: center; color: rgba(255,255,255,.6);
+    font-size: 3.6vmin; letter-spacing: .12em; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="hud"><div id="score">0</div><div id="label">Keep-ups</div></div>
+  <div id="hint">Tap to kick</div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
