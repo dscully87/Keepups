@@ -11,8 +11,10 @@ export function createTapInput(target, onTap) {
     onTap({
       x: event.clientX,
       y: event.clientY,
-      // performance.now() at dispatch beats reading it inside the game loop.
+      // The event's own timestamp is when the browser saw the touch; reading
+      // performance.now() here would already include our handler's cost.
       at: event.timeStamp || performance.now(),
+      handledAt: performance.now(),
       pointerType: event.pointerType || 'touch',
     });
   };

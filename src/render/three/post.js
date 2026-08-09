@@ -158,6 +158,23 @@ export class PostChain {
     }
   }
 
+  /**
+   * Swap tiers at runtime, for the frame-rate governor. The composer's render
+   * targets are released before rebuilding so a few tier changes over a
+   * session don't leak GPU memory.
+   */
+  setQuality(quality) {
+    if (quality === this.quality || !QUALITY[quality]) return false;
+    this.quality = quality;
+    this.settings = QUALITY[quality];
+    this.dispose();
+    this.bokeh = null;
+    this.bloom = null;
+    this.grade = null;
+    this.#build();
+    return true;
+  }
+
   /** Keep the focal plane on the ball so it never drifts out of focus. */
   focusOn(distance) {
     if (this.bokeh) this.bokeh.uniforms.focus.value = distance;
@@ -176,6 +193,7 @@ export class PostChain {
   }
 
   dispose() {
-    this.composer.dispose?.();
+    for (const pass of this.composer?.passes ?? []) pass.dispose?.();
+    this.composer?.dispose?.();
   }
 }

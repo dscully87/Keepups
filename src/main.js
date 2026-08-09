@@ -3,6 +3,7 @@ import { createTapInput } from './core/input.js';
 import { AudioEngine, haptics } from './core/audio.js';
 import { multiplierFor } from './core/combo.js';
 import { Stage } from './render/three/stage.js';
+import { PerfGovernor, LatencyProbe } from './core/perf.js';
 
 const canvas = document.getElementById('stage');
 const ui = {
@@ -30,6 +31,13 @@ const game = new Game();
 const forced = new URLSearchParams(location.search).get('q');
 const stage = new Stage(canvas, forced ? { quality: forced } : {});
 const audio = new AudioEngine();
+const latency = new LatencyProbe();
+const governor = new PerfGovernor({
+  quality: stage.quality,
+  onChange: (quality) => stage.setQuality(quality),
+});
+// An explicit ?q= is a deliberate override; don't let the governor fight it.
+if (forced) governor.enabled = false;
 
 // --- feedback ------------------------------------------------------------
 
@@ -118,12 +126,15 @@ function drainEvents() {
 
 // --- input ---------------------------------------------------------------
 
-createTapInput(canvas, () => {
+createTapInput(canvas, (tap) => {
   // Must happen inside the gesture handler or the browser blocks audio.
   audio.unlock();
   game.tap();
   // Drain here, not next frame: this is the impact instant.
   drainEvents();
+  // Measured from the browser's own event timestamp, so this is the latency
+  // this code adds on top of the hardware's.
+  latency.record(tap.at, tap.handledAt);
 });
 
 ui.sound.addEventListener('click', (e) => {
@@ -179,6 +190,7 @@ function frame(now) {
     return;
   }
 
+  governor.sample(dt);
   game.advance(dt);
   drainEvents();
   stage.update(game, dt);
@@ -201,4 +213,8 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.__KICKUP__ = { game, stage, audio, haptics, STATE, handleEvent, drainEvents, syncHud, multiplierFor };
+window.__KICKUP__ = {
+  game, stage, audio, haptics, STATE,
+  handleEvent, drainEvents, syncHud, multiplierFor,
+  governor, latency,
+};

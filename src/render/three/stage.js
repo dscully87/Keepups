@@ -3,6 +3,7 @@ import { createBall } from './ball.js';
 import { createPlayer } from './player.js';
 import { buildStadium } from './stadium.js';
 import { PostChain, detectQuality } from './post.js';
+import { ImpactFX, CameraShake } from './effects.js';
 import { makeTurfTexture } from './textures.js';
 import { SWEET_SPOT_Y } from '../../core/constants.js';
 
@@ -59,12 +60,17 @@ export class Stage {
     this.scene.add(this.player.group);
 
     this.stadium = buildStadium(this.scene);
+    this.fx = new ImpactFX(this.scene);
+    this.shake = new CameraShake();
 
     this.quality = quality;
     this.post = new PostChain(this.renderer, this.scene, this.camera, quality);
 
     this._contact = new THREE.Vector3();
     this._ballWorld = new THREE.Vector3();
+    this._camPos = new THREE.Vector3();
+    this._lookAt = new THREE.Vector3();
+    this.gravity = 9.81;
     this.resize();
   }
 
@@ -156,19 +162,25 @@ export class Stage {
   }
 
   onKick(contact) {
-    this.player.triggerKick(
-      this.contactPoint(contact.point),
-      contact.grade === 'PERFECT' ? 1.15 : 1,
-    );
+    const point = this.contactPoint(contact.point);
+    this.player.triggerKick(point, contact.grade === 'PERFECT' ? 1.15 : 1);
+
+    // Crunch: the harder and cleaner the strike, the more it throws and shakes.
+    const strength = contact.grade === 'PERFECT' ? 1 : contact.grade === 'GOOD' ? 0.66 : 0.4;
+    this.fx.burst(point, strength);
+    this.shake.add(0.20 + strength * 0.30);
   }
 
   onGameOver() {
     this.player.triggerStumble();
+    this.shake.add(0.55);
   }
 
   onRestart() {
     this.player.reset();
     this.ball.reset();
+    this.fx.clear();
+    this.shake.reset();
   }
 
   update(game, dt) {
@@ -189,6 +201,21 @@ export class Stage {
 
     this.elapsed += dt;
     this.stadium.update(this.elapsed);
+    this.gravity = game.tuning.gravity;
+    this.fx.update(dt, this.gravity);
+
+    // Camera shake is applied as an offset from the fixed rig position, so it
+    // always decays back to exactly the framing we designed.
+    if (this.shake.update(dt)) {
+      this._camPos.copy(this.cameraBase).add(this.shake.offset);
+      this._lookAt.copy(this.cameraTarget).addScaledVector(this.shake.offset, 0.35);
+      this.camera.position.copy(this._camPos);
+      this.camera.lookAt(this._lookAt);
+      this.camera.rotateZ(this.shake.roll);
+    } else if (!this.camera.position.equals(this.cameraBase)) {
+      this.camera.position.copy(this.cameraBase);
+      this.camera.lookAt(this.cameraTarget);
+    }
 
     // Rack focus onto the ball so it is never the thing that goes soft.
     this._ballWorld.set(b.x, b.y, b.z + BALL_FORWARD);
@@ -197,6 +224,25 @@ export class Stage {
 
   render(dt = 1 / 60) {
     this.post.render(dt);
+  }
+
+  /**
+   * Runtime quality change from the frame-rate governor. Shadows are the other
+   * big GPU cost, so they go with the lowest tier.
+   */
+  setQuality(quality) {
+    if (quality === this.quality) return false;
+    this.quality = quality;
+    this.post.setQuality(quality);
+    this.post.setSize(this.width, this.height);
+    const shadows = quality !== 'low';
+    if (this.renderer.shadowMap.enabled !== shadows) {
+      this.renderer.shadowMap.enabled = shadows;
+      this.scene.traverse((o) => {
+        if (o.isMesh && o.material) o.material.needsUpdate = true;
+      });
+    }
+    return true;
   }
 
   /** Debug/gate helper: where the sweet spot sits in world space. */

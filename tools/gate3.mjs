@@ -10,7 +10,9 @@
  */
 import { openGame, check, report } from './harness.mjs';
 
-const { page, errors, close } = await openGame();
+// Pin the tier: with quality left adaptive the governor correctly drops to
+// 'low' under CI's software renderer, which turns shadows off.
+const { page, errors, close } = await openGame({ quality: 'high' });
 console.log('PHASE 3 GATE — VISUAL FIDELITY / 3D MIGRATION');
 
 // --- scene structure ----------------------------------------------------
