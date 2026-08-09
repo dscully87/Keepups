@@ -23,93 +23,261 @@ const RIG = [
   // Arms bind *down*, not in a T-pose. A bind pose close to the rest pose
   // keeps every animated rotation small and predictable: elbow flexion is
   // simply a negative rotation about local X for both arms.
-  ['clavL', 'chest', [0.055, 0.125, 0]],
-  ['armL', 'clavL', [0.125, -0.03, 0]],
+  // The clavicle carries the shoulder out to ±0.20 so the deltoid caps land a
+  // full head-width clear of the neck — that width is most of the V-taper.
+  ['clavL', 'chest', [0.058, 0.090, 0]],
+  ['armL', 'clavL', [0.142, -0.016, 0]],
   ['foreL', 'armL', [0.035, -0.255, 0]],
   ['handL', 'foreL', [0.012, -0.235, 0]],
 
-  ['clavR', 'chest', [-0.055, 0.125, 0]],
-  ['armR', 'clavR', [-0.125, -0.03, 0]],
+  ['clavR', 'chest', [-0.058, 0.090, 0]],
+  ['armR', 'clavR', [-0.142, -0.016, 0]],
   ['foreR', 'armR', [-0.035, -0.255, 0]],
   ['handR', 'foreR', [-0.012, -0.235, 0]],
 
   ['thighL', 'hips', [0.11, -0.06, 0]],
   ['shinL', 'thighL', [0, -0.42, 0]],
   ['footL', 'shinL', [0, -0.40, 0]],
-  ['toeL', 'footL', [0, -0.04, 0.13]],
+  ['toeL', 'footL', [0, -0.042, 0.145]],
 
   ['thighR', 'hips', [-0.11, -0.06, 0]],
   ['shinR', 'thighR', [0, -0.42, 0]],
   ['footR', 'shinR', [0, -0.40, 0]],
-  ['toeR', 'footR', [0, -0.04, 0.13]],
+  ['toeR', 'footR', [0, -0.042, 0.145]],
 ];
 
 export const THIGH_LENGTH = 0.42;
 export const SHIN_LENGTH = 0.40;
 /** Ankle → toe, i.e. how far the boot extends past the joint the IK solves for. */
-export const FOOT_LENGTH = Math.hypot(0.04, 0.13);
+export const FOOT_LENGTH = Math.hypot(0.042, 0.145);
 
 const MATERIAL_INDEX = { skin: 0, shirt: 1, shorts: 2, socks: 3, boots: 4, hair: 5 };
 
 /**
- * segment: [fromBone, toBone, t0, t1, radiusAtT0, radiusAtT1, materialKey]
+ * Limbs are lathes, not cylinders.
  *
- * t0/t1 slice a fraction of the bone span, which is what lets a sleeve stop
- * mid-bicep and shorts stop mid-thigh without inventing extra bones. Skin
- * weights are still computed against the *whole* span, so a sliced piece
- * deforms exactly as the full limb would.
+ * `rings` is an authored radius profile: `[t, rx, rz, dz]`, where `t` is a
+ * fraction of the bone span (it may run negative or past 1 — that is how a
+ * deltoid caps over the top of the shoulder and a sock runs on into the boot),
+ * `rx`/`rz` are the half-axes of an elliptical cross-section and `dz` slides
+ * the ring sideways. The profile is interpolated with a shape-preserving
+ * (monotone) spline, so a control point is a *bulge*, never an overshoot: that
+ * is what buys the bicep, the calf and the quad sweep. Skin weights are still
+ * measured along the whole bone span, so slices of one limb deform together.
+ *
+ * The local frame is: +y along the bone, +z the component of `hint` (world +z
+ * unless stated) perpendicular to it, +x their cross product. `rx` is applied
+ * symmetrically so its sign never matters; `dz` and `rz` follow `hint`.
+ *
+ * Every piece starts *inside* the volume it grows out of and swells outward.
+ * That is the whole trick behind losing the scalloped seams: no shape ever
+ * punches through its neighbour, it emerges from it.
  */
-const SEGMENTS = [
-  // Starts below the hips so the cylinder's flat hem hides inside the shorts.
-  ['hips', 'spine', -0.22, 1.00, 0.126, 0.138, 'shirt'],
-  ['spine', 'chest', 0.00, 1.00, 0.138, 0.166, 'shirt'],
-  ['chest', 'neck', 0.00, 0.72, 0.166, 0.088, 'shirt'],
-  ['chest', 'neck', 0.72, 1.00, 0.058, 0.052, 'skin'],
-  ['neck', 'head', 0.00, 1.00, 0.052, 0.062, 'skin'],
+const TORSO_RADIAL = 32;
+const LIMB_RADIAL = 26;
+const THIN_RADIAL = 22;
 
-  ['clavL', 'armL', 0.00, 1.00, 0.080, 0.062, 'shirt'],
-  ['armL', 'foreL', 0.00, 0.52, 0.058, 0.048, 'shirt'], // sleeve
-  ['armL', 'foreL', 0.52, 1.00, 0.045, 0.038, 'skin'],
-  ['foreL', 'handL', 0.00, 1.00, 0.038, 0.030, 'skin'],
-  ['clavR', 'armR', 0.00, 1.00, 0.080, 0.062, 'shirt'],
-  ['armR', 'foreR', 0.00, 0.52, 0.058, 0.048, 'shirt'],
-  ['armR', 'foreR', 0.52, 1.00, 0.045, 0.038, 'skin'],
-  ['foreR', 'handR', 0.00, 1.00, 0.038, 0.030, 'skin'],
+const LIMBS = [
+  // --- torso: elliptical throughout, wider in x than z, so it reads as a
+  // chest rather than a pipe. Waist at the spine, widest at the chest.
+  // The torso is one continuous lathe over the whole spine, not a stack of
+  // per-bone slices. Slices leave two problems: the flat caps where they abut
+  // draw a hard line across the chest, and the skin weights restart at every
+  // boundary, so the mesh creases there whenever the spine bends. Ring t is in
+  // metres above the first bone in the chain.
+  { chain: ['hips', 'spine', 'chest', 'neck'], mat: 'shirt', radial: TORSO_RADIAL, rings: [
+    [-0.046, 0.176, 0.134], // hem, draped over the top of the hips
+    [-0.028, 0.168, 0.128],
+    [-0.007, 0.156, 0.118],
+    [0.021, 0.147, 0.111],
+    [0.084, 0.142, 0.107],
+    [0.140, 0.142, 0.106], // waist — narrowest point of the torso
+    [0.190, 0.150, 0.110],
+    [0.244, 0.166, 0.118],
+    [0.296, 0.183, 0.125],
+    [0.340, 0.193, 0.129],
+    [0.374, 0.197, 0.129], // widest — lats and pecs
+    [0.411, 0.192, 0.124],
+    [0.445, 0.185, 0.118],
+    [0.473, 0.152, 0.107], // trapezius sloping into the neck
+    [0.493, 0.098, 0.088],
+    [0.510, 0.072, 0.072], // collar
+  ] },
+  { chain: ['chest', 'neck', 'head'], mat: 'skin', radial: THIN_RADIAL, rings: [
+    [0.143, 0.056],
+    [0.170, 0.058],
+    [0.214, 0.062],
+    [0.238, 0.066],
+  ] },
 
-  ['thighL', 'shinL', 0.00, 0.46, 0.100, 0.082, 'shorts'],
-  ['thighL', 'shinL', 0.46, 1.00, 0.078, 0.060, 'skin'],
-  ['shinL', 'footL', 0.00, 0.14, 0.060, 0.058, 'skin'],
-  ['shinL', 'footL', 0.14, 1.00, 0.061, 0.042, 'socks'], // sock top
-  ['footL', 'toeL', 0.00, 1.00, 0.048, 0.038, 'boots'],
-  ['thighR', 'shinR', 0.00, 0.46, 0.100, 0.082, 'shorts'],
-  ['thighR', 'shinR', 0.46, 1.00, 0.078, 0.060, 'skin'],
-  ['shinR', 'footR', 0.00, 0.14, 0.060, 0.058, 'skin'],
-  ['shinR', 'footR', 0.14, 1.00, 0.061, 0.042, 'socks'],
-  ['footR', 'toeR', 0.00, 1.00, 0.048, 0.038, 'boots'],
+  // --- shoulder yoke. Its axis runs almost straight out along x, so here the
+  // local frame puts `rx` vertical and `rz` front-to-back: a shoulder is much
+  // deeper than it is tall.
+  { a: 'clavL', b: 'armL', mat: 'shirt', radial: THIN_RADIAL, rings: [
+    [-0.20, 0.062, 0.092],
+    [0.00, 0.070, 0.102],
+    [0.45, 0.076, 0.100],
+    [0.80, 0.082, 0.096],
+    [1.00, 0.084, 0.092],
+  ] },
+
+  // --- deltoid cap and sleeve. The profile domes over the top of the shoulder
+  // (negative t) so no separate sphere is needed to close the joint.
+  { a: 'armL', b: 'foreL', mat: 'shirt', radial: LIMB_RADIAL, rings: [
+    [-0.32, 0.014],
+    [-0.28, 0.040],
+    [-0.22, 0.060],
+    [-0.13, 0.074],
+    [-0.02, 0.080],
+    [0.08, 0.081], // deltoid crown
+    [0.20, 0.077],
+    [0.30, 0.071],
+    [0.40, 0.0665],
+    [0.44, 0.0655], // sleeve hem
+  ] },
+  { a: 'armL', b: 'foreL', mat: 'skin', radial: LIMB_RADIAL, rings: [
+    [0.40, 0.060],
+    [0.50, 0.0632],
+    [0.60, 0.0625], // bicep belly
+    [0.72, 0.056],
+    [0.86, 0.0505],
+    [1.00, 0.048], // elbow
+  ] },
+  { a: 'foreL', b: 'handL', mat: 'skin', radial: LIMB_RADIAL, rings: [
+    [-0.08, 0.047],
+    [0.00, 0.050],
+    [0.10, 0.055], // flexor mass, high on the forearm
+    [0.22, 0.053],
+    [0.42, 0.045],
+    [0.65, 0.037],
+    [0.85, 0.032],
+    [1.00, 0.031], // wrist
+  ] },
+
+  // --- shorts. One wide pelvic block, widest at the greater trochanter, with
+  // the leg tubes emerging out of it rather than butting into its side.
+  { a: 'hips', b: 'spine', mat: 'shorts', radial: TORSO_RADIAL, rings: [
+    [-1.30, 0.014, 0.013],
+    [-1.22, 0.062, 0.054],
+    [-1.10, 0.128, 0.104],
+    [-0.97, 0.172, 0.124],
+    [-0.83, 0.191, 0.130],
+    [-0.68, 0.196, 0.133], // hips at their widest
+    [-0.57, 0.194, 0.132],
+    [-0.45, 0.185, 0.128],
+    [-0.33, 0.167, 0.121], // from here up it hides under the shirt hem
+    [-0.20, 0.155, 0.114],
+    [-0.05, 0.145, 0.110],
+    [0.12, 0.138, 0.104],
+    [0.20, 0.104, 0.080],
+    [0.24, 0.044, 0.036],
+  ] },
+  { a: 'thighL', b: 'shinL', mat: 'shorts', radial: LIMB_RADIAL, rings: [
+    // The top of the leg is far deeper than it is wide and sits back, so it
+    // carries the glute down into the thigh instead of leaving it as a lobe
+    // hanging off the back of an otherwise round tube.
+    [-0.055, 0.048, 0.052],
+    [-0.020, 0.064, 0.080, -0.014],
+    [0.020, 0.080, 0.104, -0.022],
+    [0.070, 0.091, 0.112, -0.024],
+    [0.140, 0.097, 0.110, -0.016],
+    [0.240, 0.098, 0.102, -0.006],
+    [0.340, 0.096, 0.096],
+    [0.430, 0.0935],
+    [0.470, 0.0930],
+    [0.500, 0.1000], // flared leg opening
+    [0.525, 0.0970],
+  ] },
+  { a: 'thighL', b: 'shinL', mat: 'skin', radial: LIMB_RADIAL, rings: [
+    [0.45, 0.089],
+    [0.60, 0.086],
+    [0.74, 0.081],
+    [0.87, 0.0775], // vastus medialis, low and inboard
+    [1.00, 0.072],
+    [1.06, 0.070],
+  ] },
+  { a: 'shinL', b: 'footL', mat: 'skin', radial: LIMB_RADIAL, rings: [
+    [-0.06, 0.0685],
+    [0.00, 0.0715],
+    [0.07, 0.0740],
+    [0.16, 0.0745],
+  ] },
+  { a: 'shinL', b: 'footL', mat: 'socks', radial: LIMB_RADIAL, rings: [
+    [0.11, 0.0700], // starts under the skin of the shin, then swells past it
+    [0.16, 0.0790], // rolled sock top
+    [0.24, 0.0830, 0.0830, -0.010],
+    [0.32, 0.0845, 0.0845, -0.016], // calf, carried backwards
+    [0.44, 0.0755, 0.0755, -0.013],
+    [0.58, 0.0615, 0.0615, -0.006],
+    [0.74, 0.0490, 0.0490, -0.001],
+    [0.90, 0.0420],
+    [1.00, 0.0405],
+    [1.12, 0.0395], // runs on into the boot
+  ] },
+];
+
+/**
+ * The boot is not a limb slice: it is swept along world +z from behind the
+ * heel to past the toe, rigid to the ankle, with `dz` (which is *up* here,
+ * because the hint is world +y) holding the sole flat while the profile flares
+ * across the toe box.
+ */
+const BOOT_ORIGIN = [0, -0.010, -0.082]; // relative to the ankle
+const BOOT_RINGS = [
+  // [u along +z, half-width, half-height, height of the ring centre above origin]
+  [0.000, 0.012, 0.013, 0.000],
+  [0.008, 0.032, 0.034, -0.002],
+  [0.024, 0.043, 0.046, -0.002],
+  [0.046, 0.049, 0.051, 0.002],
+  [0.074, 0.051, 0.053, 0.007], // ankle collar
+  [0.106, 0.051, 0.047, 0.001],
+  [0.140, 0.055, 0.040, -0.006],
+  [0.176, 0.058, 0.034, -0.012], // widest across the toe box
+  [0.208, 0.057, 0.030, -0.016],
+  [0.236, 0.048, 0.024, -0.021],
+  [0.248, 0.031, 0.016, -0.027],
+  [0.254, 0.012, 0.008, -0.031],
+];
+
+/** The hand: an oversized mitt swept on past the wrist, thin across the body
+ * and broad front-to-back, the way a hand hangs. */
+const HAND_RINGS = [
+  [-0.012, 0.029, 0.030],
+  [0.000, 0.031, 0.033],
+  [0.024, 0.033, 0.043],
+  [0.056, 0.034, 0.050], // knuckles
+  [0.092, 0.033, 0.051],
+  [0.122, 0.030, 0.046],
+  [0.142, 0.022, 0.033],
+  [0.152, 0.011, 0.016],
+  [0.157, 0.004, 0.006],
 ];
 
 /**
  * joint: [bone, radius, materialKey]
- * No cap on `chest` — a sphere there scallops through the torso cone. The
- * torso taper already closes that joint on its own.
+ *
+ * Only the joints the limb profiles cannot close on their own, and every
+ * radius is strictly smaller than both limbs meeting there — a cap that pokes
+ * through its neighbours is exactly what produced the old scalloped seams.
+ * Shoulders, ankles and the waist need no cap at all now.
  */
 const JOINTS = [
-  ['hips', 0.148, 'shorts'],
-  ['clavL', 0.074, 'shirt'],
-  ['clavR', 0.074, 'shirt'],
-  ['armL', 0.058, 'shirt'],
-  ['armR', 0.058, 'shirt'],
-  ['foreL', 0.044, 'skin'],
-  ['foreR', 0.044, 'skin'],
-  ['handL', 0.036, 'skin'],
-  ['handR', 0.036, 'skin'],
-  ['thighL', 0.100, 'shorts'],
-  ['thighR', 0.100, 'shorts'],
-  ['shinL', 0.062, 'skin'],
-  ['shinR', 0.062, 'skin'],
-  ['footL', 0.048, 'boots'],
-  ['footR', 0.048, 'boots'],
+  ['armL', 0.068, 'shirt'],
+  ['armR', 0.068, 'shirt'],
+  ['foreL', 0.046, 'skin'],
+  ['foreR', 0.046, 'skin'],
+  ['handL', 0.028, 'skin'],
+  ['handR', 0.028, 'skin'],
+  ['thighL', 0.072, 'shorts'],
+  ['thighR', 0.072, 'shorts'],
+  ['shinL', 0.068, 'skin'],
+  ['shinR', 0.068, 'skin'],
 ];
+
+/** `L`-suffixed bone names mirrored onto the -x side. */
+function mirrorBone(name) {
+  return name.endsWith('L') ? `${name.slice(0, -1)}R` : name;
+}
 
 export function createPlayer() {
   const bones = new Map();
@@ -132,27 +300,63 @@ export function createPlayer() {
 
   // --- geometry, authored directly in bind-pose world space --------------
   const pieces = [];
-  for (const [from, to, t0, t1, r0, r1, matKey] of SEGMENTS) {
-    pieces.push(
-      limbGeometry(
-        worldOf(from),
-        worldOf(to),
-        t0,
-        t1,
-        r0,
-        r1,
-        boneIndex.get(from),
-        boneIndex.get(to),
-        MATERIAL_INDEX[matKey],
-      ),
-    );
+  for (const limb of LIMBS) {
+    if (limb.chain) {
+      const chain = limb.chain.map(worldOf);
+      pieces.push(chainGeometry(
+        tubeGeometry(chain[0], UP, limb.rings, 1, FORWARD, limb.radial),
+        chain,
+        limb.chain.map((n) => boneIndex.get(n)),
+        MATERIAL_INDEX[limb.mat],
+      ));
+      continue;
+    }
+    const sides = limb.a.endsWith('L') || limb.b.endsWith('L')
+      ? [(n) => n, mirrorBone]
+      : [(n) => n];
+    for (const side of sides) {
+      const from = side(limb.a);
+      const to = side(limb.b);
+      pieces.push(
+        limbGeometry(
+          worldOf(from),
+          worldOf(to),
+          limb.rings,
+          limb.radial,
+          limb.hint,
+          boneIndex.get(from),
+          boneIndex.get(to),
+          MATERIAL_INDEX[limb.mat],
+        ),
+      );
+    }
   }
+
+  // Hands and boots are swept along their own axes rather than a bone span:
+  // a hand runs on past the wrist, and a boot points forward, not down.
+  for (const side of ['L', 'R']) {
+    const wrist = worldOf(`hand${side}`);
+    const down = wrist.clone().sub(worldOf(`fore${side}`)).normalize();
+    pieces.push(rigidTo(
+      tubeGeometry(wrist, down, HAND_RINGS, 1, FORWARD, THIN_RADIAL),
+      boneIndex.get(`hand${side}`),
+      MATERIAL_INDEX.skin,
+    ));
+
+    const ankle = worldOf(`foot${side}`);
+    const origin = ankle.clone().add(new THREE.Vector3().fromArray(BOOT_ORIGIN));
+    pieces.push(rigidTo(
+      tubeGeometry(origin, FORWARD, BOOT_RINGS, 1, UP, LIMB_RADIAL),
+      boneIndex.get(`foot${side}`),
+      MATERIAL_INDEX.boots,
+    ));
+  }
+
   // Head is a squashed sphere rather than a capsule.
   pieces.push(headGeometry(worldOf('head'), boneIndex.get('head')));
   pieces.push(hairGeometry(worldOf('head'), boneIndex.get('head')));
 
-  // Joint caps. Tapered cylinders leave a visible notch wherever a limb
-  // pivots; a sphere rigid to the joint's own bone closes it at every angle.
+  // The few joints the limb profiles cannot close on their own.
   for (const [bone, radius, matKey] of JOINTS) {
     pieces.push(jointGeometry(worldOf(bone), radius, boneIndex.get(bone), MATERIAL_INDEX[matKey]));
   }
@@ -451,28 +655,171 @@ export class PlayerRig {
 
 // --- geometry helpers ----------------------------------------------------
 
+const UP = new THREE.Vector3(0, 1, 0);
+const FORWARD = new THREE.Vector3(0, 0, 1);
+/** Roughly how far apart to place rings along a swept profile, in metres. */
+const RING_SPACING = 0.018;
+
 /**
- * A tapered capsule spanning two bind-pose joints, skinned so vertices near
+ * Shape-preserving (Fritsch–Carlson) cubic through the control points.
+ *
+ * A plain Catmull-Rom overshoots either side of a bulge, which on a limb shows
+ * up as a pinch just above and below every muscle. This flattens the tangent
+ * at every local extreme instead, so an authored bulge is a bulge and nothing
+ * more.
+ */
+function monotoneSpline(xs, ys) {
+  const n = xs.length;
+  if (n === 1) return () => ys[0];
+  const d = new Array(n - 1);
+  for (let i = 0; i < n - 1; i += 1) d[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
+  const m = new Array(n);
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i += 1) {
+    if (d[i - 1] * d[i] <= 0) {
+      m[i] = 0;
+      continue;
+    }
+    const h0 = xs[i] - xs[i - 1];
+    const h1 = xs[i + 1] - xs[i];
+    const w1 = 2 * h1 + h0;
+    const w2 = h1 + 2 * h0;
+    m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+  }
+  return (x) => {
+    let i = 0;
+    while (i < n - 2 && x > xs[i + 1]) i += 1;
+    const h = xs[i + 1] - xs[i];
+    const s = (x - xs[i]) / h;
+    const s2 = s * s;
+    const s3 = s2 * s;
+    return (2 * s3 - 3 * s2 + 1) * ys[i]
+      + (s3 - 2 * s2 + s) * h * m[i]
+      + (-2 * s3 + 3 * s2) * ys[i + 1]
+      + (s3 - s2) * h * m[i + 1];
+  };
+}
+
+/**
+ * An orthonormal frame with +y along `axis` and +z as close to `hint` as the
+ * axis allows. `x` may come out mirrored for a downward-pointing bone — which
+ * is harmless, because radii are symmetric and only `dz` follows `hint`.
+ */
+function frameFor(axis, hint) {
+  const z = hint.clone().addScaledVector(axis, -hint.dot(axis));
+  if (z.lengthSq() < 1e-8) {
+    z.set(0, 1, 0).addScaledVector(axis, -axis.y);
+    if (z.lengthSq() < 1e-8) z.set(1, 0, 0).addScaledVector(axis, -axis.x);
+  }
+  z.normalize();
+  return { x: new THREE.Vector3().crossVectors(axis, z).normalize(), z };
+}
+
+/**
+ * Sweeps an authored `[t, rx, rz, dz]` profile along a straight axis. `unit`
+ * converts t into metres — a bone span for a limb, 1 for a piece measured
+ * directly in metres.
+ *
+ * Ends get a *flat* cap on its own vertices, never shared with the tube. That
+ * keeps a sleeve hem or a shirt hem a crisp edge under smooth shading instead
+ * of rolling into a bulb.
+ */
+function tubeGeometry(origin, axis, rings, unit, hint, radial) {
+  const frame = frameFor(axis, hint || FORWARD);
+  const ts = rings.map((r) => r[0]);
+  const fx = monotoneSpline(ts, rings.map((r) => r[1]));
+  const fz = monotoneSpline(ts, rings.map((r) => (r.length > 2 ? r[2] : r[1])));
+  const fd = monotoneSpline(ts, rings.map((r) => (r.length > 3 ? r[3] : 0)));
+
+  const samples = [];
+  for (let i = 0; i < ts.length - 1; i += 1) {
+    const steps = Math.max(1, Math.round((Math.abs(ts[i + 1] - ts[i]) * unit) / RING_SPACING));
+    for (let s = 0; s < steps; s += 1) samples.push(ts[i] + ((ts[i + 1] - ts[i]) * s) / steps);
+  }
+  samples.push(ts[ts.length - 1]);
+
+  const cos = [];
+  const sin = [];
+  for (let j = 0; j < radial; j += 1) {
+    const a = (j / radial) * Math.PI * 2;
+    cos.push(Math.cos(a));
+    sin.push(Math.sin(a));
+  }
+
+  const position = [];
+  const uv = [];
+  const index = [];
+  const c = new THREE.Vector3();
+  const tFirst = samples[0];
+  const tSpan = samples[samples.length - 1] - tFirst || 1;
+
+  const ringAt = (t) => {
+    c.copy(origin).addScaledVector(axis, t * unit).addScaledVector(frame.z, fd(t));
+    return { rx: Math.max(fx(t), 0.0008), rz: Math.max(fz(t), 0.0008) };
+  };
+  const emit = (rx, rz, j) => {
+    position.push(
+      c.x + frame.x.x * rx * cos[j] + frame.z.x * rz * sin[j],
+      c.y + frame.x.y * rx * cos[j] + frame.z.y * rz * sin[j],
+      c.z + frame.x.z * rx * cos[j] + frame.z.z * rz * sin[j],
+    );
+  };
+
+  for (const t of samples) {
+    const { rx, rz } = ringAt(t);
+    for (let j = 0; j < radial; j += 1) {
+      emit(rx, rz, j);
+      uv.push(j / radial, (t - tFirst) / tSpan);
+    }
+  }
+  // Ring vertices wrap rather than duplicating a seam, so the shading runs
+  // smoothly the whole way round.
+  for (let i = 0; i < samples.length - 1; i += 1) {
+    for (let j = 0; j < radial; j += 1) {
+      const a = i * radial + j;
+      const b = i * radial + ((j + 1) % radial);
+      index.push(a, a + radial, b, b, a + radial, b + radial);
+    }
+  }
+
+  for (const [t, isStart] of [[samples[0], true], [samples[samples.length - 1], false]]) {
+    const { rx, rz } = ringAt(t);
+    const base = position.length / 3;
+    position.push(c.x, c.y, c.z);
+    uv.push(0.5, 0.5);
+    for (let j = 0; j < radial; j += 1) {
+      emit(rx, rz, j);
+      uv.push(0.5 + 0.5 * cos[j], 0.5 + 0.5 * sin[j]);
+    }
+    for (let j = 0; j < radial; j += 1) {
+      const a = base + 1 + j;
+      const b = base + 1 + ((j + 1) % radial);
+      if (isStart) index.push(base, a, b);
+      else index.push(base, b, a);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  // Normals are recomputed once per merged mesh; this only keeps the attribute
+  // sets identical so the merge succeeds.
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(position.length), 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  return geo;
+}
+
+/**
+ * A profile-swept limb spanning two bind-pose joints, skinned so vertices near
  * the far joint blend partly onto the child bone. That soft handover is what
  * stops the knee and elbow from creasing.
  */
-function limbGeometry(a, b, t0, t1, r0, r1, boneA, boneB, materialIndex) {
+function limbGeometry(a, b, rings, radial, hint, boneA, boneB, materialIndex) {
   const dir = new THREE.Vector3().subVectors(b, a);
   const fullLength = dir.length();
   const axis = dir.clone().normalize();
-  const start = a.clone().addScaledVector(axis, t0 * fullLength);
-  const length = (t1 - t0) * fullLength;
-  const radial = 14;
-  const rings = 8;
-
-  const geo = new THREE.CylinderGeometry(r1, r0, length, radial, rings, false);
-  // CylinderGeometry runs along +y centred at the origin: shift so y=0 is the
-  // slice's start point.
-  geo.translate(0, length / 2, 0);
-
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
-  geo.applyQuaternion(q);
-  geo.translate(start.x, start.y, start.z);
+  const geo = tubeGeometry(a, axis, rings, fullLength, hint, radial);
 
   const pos = geo.getAttribute('position');
   const count = pos.count;
@@ -497,6 +844,37 @@ function limbGeometry(a, b, t0, t1, r0, r1, boneA, boneB, materialIndex) {
   return { geometry: geo, materialIndex };
 }
 
+/**
+ * Skins one continuous piece across a whole bone chain by height.
+ *
+ * Unlike the per-limb rule, weights here run *through* each bone rather than
+ * restarting at it, so a torso built as a single lathe bends smoothly along
+ * the spine instead of hinging at the places its pieces used to butt together.
+ */
+function chainGeometry(geo, chain, boneIdxs, materialIndex) {
+  const pos = geo.getAttribute('position');
+  const count = pos.count;
+  const skinIndex = new Uint16Array(count * 4);
+  const skinWeight = new Float32Array(count * 4);
+  const last = chain.length - 1;
+
+  for (let i = 0; i < count; i += 1) {
+    const y = pos.getY(i);
+    let lo = 0;
+    while (lo < last - 1 && y > chain[lo + 1].y) lo += 1;
+    const span = chain[lo + 1].y - chain[lo].y;
+    const t = THREE.MathUtils.clamp((y - chain[lo].y) / span, 0, 1);
+    const wUpper = smootherstep(0, 1, t);
+    skinIndex[i * 4] = boneIdxs[lo];
+    skinIndex[i * 4 + 1] = boneIdxs[lo + 1];
+    skinWeight[i * 4] = 1 - wUpper;
+    skinWeight[i * 4 + 1] = wUpper;
+  }
+  geo.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
+  geo.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
+  return { geometry: geo, materialIndex };
+}
+
 /** Weight every vertex of `geo` fully to one bone. */
 function rigidTo(geo, boneIdx, materialIndex) {
   const count = geo.getAttribute('position').count;
@@ -513,27 +891,67 @@ function rigidTo(geo, boneIdx, materialIndex) {
 
 /** A sphere rigidly weighted to one bone, used to cap a joint. */
 function jointGeometry(centre, radius, boneIdx, materialIndex) {
-  const geo = new THREE.SphereGeometry(radius, 14, 10);
+  const geo = new THREE.SphereGeometry(radius, 20, 14);
   geo.translate(centre.x, centre.y, centre.z);
   return rigidTo(geo, boneIdx, materialIndex);
 }
 
+// Skull: an ellipsoid, centred a little above the head bone.
+const SKULL_RISE = 0.04;
+const SKULL = [0.1012, 0.1232, 0.1100]; // semi-axes in x / y / z
+const HAIR_MARGIN = 0.008;
+const HAIRLINE = 0.0; // where the hair stops, measured above the skull centre
+const HAIR_TILT = -12.5 * (Math.PI / 180); // rim high at the brow, low at the nape
+
 /**
- * Hair: a second head sphere nudged up and back. It surfaces across the crown
- * and the back of the skull and stays buried inside the face, which is what
- * makes the player's facing direction readable without modelling features.
+ * Hair, as a lathe that is the skull's own profile pushed out by a constant
+ * margin and stopped at an authored hairline.
+ *
+ * The obvious approach — a second head sphere poking through the first —
+ * cannot be made clean: two ellipsoids of nearly the same size meet at a
+ * grazing angle, and a grazing intersection tessellates into a zigzag however
+ * many segments you throw at it. Offsetting the same profile means the two
+ * surfaces never intersect at all, and the hairline becomes a rim I place
+ * rather than an accident of where two blobs happen to cross.
  */
 function hairGeometry(centre, boneIdx) {
-  const geo = new THREE.SphereGeometry(0.105, 20, 16);
-  geo.scale(0.95, 1.14, 1.02);
-  geo.translate(centre.x, centre.y + 0.052, centre.z - 0.016);
+  // A skull one margin larger in every axis: strictly containing, so the two
+  // surfaces cannot cross anywhere at all.
+  const semi = SKULL.map((v) => v + HAIR_MARGIN);
+  const rings = [];
+  const STEPS = 11;
+  // Sampling by polar angle rather than by height puts rings where the profile
+  // actually turns, so the crown closes smoothly instead of on a flat disc.
+  const phi0 = Math.asin(THREE.MathUtils.clamp(HAIRLINE / semi[1], -1, 1));
+  for (let i = 0; i <= STEPS; i += 1) {
+    const phi = phi0 + ((Math.PI / 2 - phi0) * i) / STEPS;
+    rings.push([
+      semi[1] * Math.sin(phi) - HAIRLINE,
+      Math.max(semi[0] * Math.cos(phi), 0.003),
+      Math.max(semi[2] * Math.cos(phi), 0.003),
+    ]);
+  }
+  const pivot = new THREE.Vector3(centre.x, centre.y + SKULL_RISE, centre.z);
+  const geo = tubeGeometry(
+    new THREE.Vector3(pivot.x, pivot.y + HAIRLINE, pivot.z),
+    UP,
+    rings,
+    1,
+    FORWARD,
+    30,
+  );
+  // Tip the whole cap back so the rim rides high across the brow and drops to
+  // the nape — a level rim reads as a swimming cap.
+  geo.translate(-pivot.x, -pivot.y, -pivot.z);
+  geo.rotateX(HAIR_TILT);
+  geo.translate(pivot.x, pivot.y, pivot.z);
   return rigidTo(geo, boneIdx, MATERIAL_INDEX.hair);
 }
 
 function headGeometry(centre, boneIdx) {
-  const geo = new THREE.SphereGeometry(0.105, 20, 16);
-  geo.scale(0.92, 1.12, 1.0);
-  geo.translate(centre.x, centre.y + 0.04, centre.z);
+  const geo = new THREE.SphereGeometry(1, 30, 22);
+  geo.scale(SKULL[0], SKULL[1], SKULL[2]);
+  geo.translate(centre.x, centre.y + SKULL_RISE, centre.z);
   return rigidTo(geo, boneIdx, MATERIAL_INDEX.skin);
 }
 
