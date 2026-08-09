@@ -54,6 +54,7 @@ const info = await page.evaluate(
       stage.update(game, dt);
     }
     stage.render(dt);
+    window.__KICKUP__.syncHud();
 
     return { score: game.score, grade: contact?.grade ?? null, weights: stage.player.weights() };
   },

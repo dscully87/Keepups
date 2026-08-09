@@ -5,12 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#08101c" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="description" content="Project Kick-Up — a mobile-web soccer keep-up game." />
 <title>Project Kick-Up</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: #08101c;
+    background: #05080f;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent;
@@ -18,84 +19,182 @@
   }
   #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 
+  /* Scrims: the HUD sits over a bright crowd, so it needs its own ground. */
+  .scrim {
+    position: fixed; left: 0; right: 0; pointer-events: none; z-index: 2;
+  }
+  #scrim-top {
+    top: 0; height: 30vh;
+    background: linear-gradient(to bottom, rgba(4,8,16,.82) 0%, rgba(4,8,16,.45) 45%, rgba(4,8,16,0) 100%);
+  }
+  #scrim-bottom {
+    bottom: 0; height: 16vh;
+    background: linear-gradient(to top, rgba(4,8,16,.6) 0%, rgba(4,8,16,0) 100%);
+  }
+
   .hud { position: fixed; pointer-events: none; color: #fff; z-index: 5; }
 
-  #top { top: calc(env(safe-area-inset-top, 0px) + 74px); left: 0; right: 0; text-align: center; }
-  #score { font-size: 15vmin; font-weight: 800; line-height: .95; text-shadow: 0 4px 20px rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
-  #label { font-size: 3.1vmin; letter-spacing: .34em; opacity: .6; text-transform: uppercase; }
-  #combo {
-    margin-top: 1.4vmin; font-size: 4vmin; font-weight: 700; letter-spacing: .12em;
-    color: #ffd54a; text-shadow: 0 0 16px rgba(255,190,40,.55);
-    opacity: 0; transition: opacity .18s ease;
+  /* --- top strip: best / level / points ------------------------------- */
+  /* One flex column owns the whole top HUD. Positioning each block
+     independently let them overlap at some viewport aspect ratios. */
+  #hud-top {
+    top: calc(env(safe-area-inset-top, 0px) + 14px); left: 0; right: 0;
+    display: flex; flex-direction: column; align-items: stretch; gap: 2.2vmin;
   }
-
   #meta {
-    top: calc(env(safe-area-inset-top, 0px) + 16px); left: 0; right: 0;
-    display: flex; justify-content: space-between; padding: 0 5vw;
-    font-size: 3vmin; letter-spacing: .1em; opacity: .78;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 0 6vw; font-variant-numeric: tabular-nums;
   }
-  #meta span { display: block; font-size: 2.4vmin; letter-spacing: .22em; opacity: .55; text-transform: uppercase; }
-  #tier { font-weight: 700; }
+  #meta > div { min-width: 22vw; }
+  #meta > div:nth-child(2) { text-align: center; }
+  #meta > div:nth-child(3) { text-align: right; }
+  #meta span {
+    display: block; font-size: 2.5vmin; letter-spacing: .24em; opacity: .55;
+    text-transform: uppercase; margin-bottom: .5vmin;
+  }
+  #meta b { font-size: 3.6vmin; font-weight: 700; letter-spacing: .04em; }
+  #tier { transition: color .4s ease; }
+  #tier[data-level="0"] { color: #cfe0f5; }
   #tier[data-level="1"] { color: #7fe0a8; }
   #tier[data-level="2"] { color: #ffc65c; }
   #tier[data-level="3"] { color: #ff7a6b; }
 
+  /* --- score ---------------------------------------------------------- */
+  #top { text-align: center; }
+  #score {
+    font-size: 17vmin; font-weight: 800; line-height: .92;
+    text-shadow: 0 3px 26px rgba(0,0,0,.75);
+    font-variant-numeric: tabular-nums;
+    transition: transform .09s cubic-bezier(.2,.9,.3,1.4);
+    transform-origin: 50% 50%;
+  }
+  #score.hit { transform: scale(1.16); }
+  #label { font-size: 2.8vmin; letter-spacing: .36em; opacity: .6; text-transform: uppercase; }
+
+  /* --- combo meter ---------------------------------------------------- */
+  #combo-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 1.2vmin;
+    opacity: 0; transition: opacity .2s ease;
+    /* Reserve the row so the score never shifts when a combo appears. */
+    min-height: 7vmin;
+  }
+  #combo-wrap.on { opacity: 1; }
+  #combo {
+    font-size: 4.2vmin; font-weight: 800; letter-spacing: .14em;
+    color: #ffd54a; text-shadow: 0 0 18px rgba(255,190,40,.6);
+  }
+  #combo-bar {
+    width: 34vmin; height: .9vmin; border-radius: 1vmin;
+    background: rgba(255,255,255,.16); overflow: hidden;
+  }
+  #combo-fill {
+    height: 100%; width: 0%; border-radius: 1vmin;
+    background: linear-gradient(90deg, #7fe0a8, #ffd54a);
+    transition: width .16s ease;
+  }
+
+  /* --- judgement flash ------------------------------------------------ */
   #flash {
-    top: 46%; left: 0; right: 0; text-align: center;
-    font-size: 7vmin; font-weight: 800; letter-spacing: .06em;
-    opacity: 0; transform: translateY(-10px) scale(.92);
-    transition: opacity .18s ease, transform .18s ease;
-    text-shadow: 0 4px 24px rgba(0,0,0,.6);
+    top: 76%; left: 0; right: 0; text-align: center;
+    font-size: 7.2vmin; font-weight: 800; letter-spacing: .05em;
+    opacity: 0; transform: translateY(-8px) scale(.9);
+    transition: opacity .16s ease, transform .16s ease;
+    text-shadow: 0 4px 26px rgba(0,0,0,.7);
   }
   #flash[data-tone="perfect"] { color: #6ff2b0; }
-  #flash[data-tone="good"]    { color: #d8e6ff; }
+  #flash[data-tone="good"]    { color: #dbe8ff; }
   #flash[data-tone="sloppy"]  { color: #ff8f7a; }
-  #flash[data-tone="tier"]    { color: #ffd54a; font-size: 8.5vmin; }
+  #flash[data-tone="tier"]    { color: #ffd54a; font-size: 8.6vmin; letter-spacing: .12em; }
 
   #hint {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 26px); left: 0; right: 0; text-align: center;
-    color: rgba(255,255,255,.62); font-size: 3.6vmin; letter-spacing: .16em;
-    transition: opacity .25s ease;
-    animation: breathe 2.4s ease-in-out infinite;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vmin);
+    /* Shrink-to-fit and centre, so the hint's box is its text — a full-width
+       box would run under the sound button even though the words never do. */
+    left: 0; right: 0; width: fit-content; max-width: 72vw; margin-inline: auto;
+    text-align: center;
+    color: rgba(255,255,255,.68); font-size: 3.4vmin; letter-spacing: .18em;
+    transition: opacity .3s ease;
   }
-  @keyframes breathe { 0%,100% { opacity: .45 } 50% { opacity: .9 } }
+  /* The pulse lives on the inner span: a keyframe animating opacity on #hint
+     itself would outrank the inline opacity JS uses to hide it during play. */
+  #hint span { display: inline-block; animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { opacity: .45 } 50% { opacity: .95 } }
 
+  /* --- sound toggle --------------------------------------------------- */
+  #sound {
+    position: fixed; z-index: 8; pointer-events: auto;
+    right: calc(env(safe-area-inset-right, 0px) + 3vw);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 3vw);
+    width: 11vmin; height: 11vmin; min-width: 44px; min-height: 44px;
+    border-radius: 50%; border: 1px solid rgba(255,255,255,.18);
+    background: rgba(8,14,24,.5); color: #fff;
+    font-size: 4.4vmin; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  #sound:active { transform: scale(.93); }
+
+  /* --- full time ------------------------------------------------------ */
   #overlay {
     position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
     align-items: center; justify-content: center; text-align: center; color: #fff;
-    background: radial-gradient(circle at 50% 45%, rgba(6,14,26,.72), rgba(4,8,16,.94));
+    background: radial-gradient(circle at 50% 45%, rgba(6,12,22,.74), rgba(3,6,12,.95));
     opacity: 0; visibility: hidden; transition: opacity .35s ease, visibility .35s;
     pointer-events: none;
   }
   #overlay.visible { opacity: 1; visibility: visible; }
-  #overlay h1 { margin: 0; font-size: 6vmin; letter-spacing: .3em; opacity: .7; font-weight: 600; }
-  #final-score { font-size: 26vmin; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-  #final-meta { font-size: 3.4vmin; opacity: .75; letter-spacing: .08em; }
-  #again { margin-top: 5vmin; font-size: 4vmin; letter-spacing: .22em; opacity: .8; animation: breathe 2s ease-in-out infinite; }
+  #overlay h1 { margin: 0 0 1vmin; font-size: 5vmin; letter-spacing: .4em; opacity: .6; font-weight: 600; }
+  #final-score { font-size: 27vmin; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  #record {
+    font-size: 3.2vmin; letter-spacing: .3em; color: #ffd54a; text-transform: uppercase;
+    height: 4vmin; opacity: 0; transition: opacity .3s ease;
+  }
+  #record.on { opacity: 1; }
+  #final-stats {
+    display: flex; gap: 8vmin; margin-top: 4vmin; font-variant-numeric: tabular-nums;
+  }
+  #final-stats span { display: block; font-size: 2.5vmin; letter-spacing: .24em; opacity: .5; text-transform: uppercase; }
+  #final-stats b { font-size: 5vmin; font-weight: 700; }
+  #again { margin-top: 7vmin; font-size: 3.6vmin; letter-spacing: .26em; animation: breathe 2s ease-in-out infinite; }
 </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
+  <div class="scrim" id="scrim-top"></div>
+  <div class="scrim" id="scrim-bottom"></div>
 
-  <div class="hud" id="meta">
-    <div><span>Best</span><b id="best">0</b></div>
-    <div><span>Level</span><b id="tier" data-level="0">WARM-UP</b></div>
-    <div><span>Points</span><b id="points">0</b></div>
-  </div>
+  <div class="hud" id="hud-top">
+    <div id="meta">
+      <div><span>Best</span><b id="best">0</b></div>
+      <div><span>Level</span><b id="tier" data-level="0">WARM-UP</b></div>
+      <div><span>Points</span><b id="points">0</b></div>
+    </div>
 
-  <div class="hud" id="top">
-    <div id="score">0</div>
-    <div id="label">Keep-ups</div>
-    <div id="combo"></div>
+    <div id="top">
+      <div id="score">0</div>
+      <div id="label">Keep-ups</div>
+    </div>
+
+    <div id="combo-wrap">
+      <div id="combo"></div>
+      <div id="combo-bar"><div id="combo-fill"></div></div>
+    </div>
   </div>
 
   <div class="hud" id="flash"></div>
-  <div class="hud" id="hint">Tap to kick</div>
+  <div class="hud" id="hint"><span>Tap anywhere to kick</span></div>
+
+  <button id="sound" aria-label="Toggle sound">&#9835;</button>
 
   <div id="overlay">
     <h1>FULL TIME</h1>
     <div id="final-score">0</div>
-    <div id="final-meta"></div>
+    <div id="record">New personal best</div>
+    <div id="final-stats">
+      <div><span>Points</span><b id="final-points">0</b></div>
+      <div><span>Best combo</span><b id="final-combo">0</b></div>
+      <div><span>Record</span><b id="final-best">0</b></div>
+    </div>
     <div id="again">TAP TO PLAY AGAIN</div>
   </div>
 
