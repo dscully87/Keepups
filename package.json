@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node tools/server.mjs 8080",
     "gate:1": "node tools/gate1.mjs",
-    "gate": "node tools/gate1.mjs"
+    "gate": "node tools/gate1.mjs && node tools/gate2.mjs",
+    "gate:2": "node tools/gate2.mjs"
   },
   "devDependencies": {
     "playwright": "1.56.1"

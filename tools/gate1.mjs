@@ -53,18 +53,28 @@ check('screen tap reaches the game', afterDom > domTap, `score ${domTap} → ${a
 const bounds = await page.evaluate(() => {
   const { game } = window.__KICKUP__;
   game.reset();
+  game.start();
   let maxAbsX = 0;
   let maxY = 0;
   let minY = Infinity;
+  let totalKicks = 0;
+  let prevScore = 0;
   for (let i = 0; i < 60 * 60; i += 1) {
     game.advance(1 / 60);
     // Tap aggressively and at random to try to punt the ball out of the arena.
     if (Math.random() < 0.25) game.tap();
+    if (game.score > prevScore) totalKicks += game.score - prevScore;
+    prevScore = game.score;
     maxAbsX = Math.max(maxAbsX, Math.abs(game.ball.x));
     maxY = Math.max(maxY, game.ball.y);
     minY = Math.min(minY, game.ball.y);
+    if (game.state === 'GAME_OVER') {
+      game.reset();
+      game.start();
+      prevScore = 0;
+    }
   }
-  return { maxAbsX, maxY, minY, score: game.score };
+  return { maxAbsX, maxY, minY, score: totalKicks };
 });
 check('ball stays within horizontal bounds', bounds.maxAbsX <= 1.35, `max |x| = ${bounds.maxAbsX.toFixed(2)} m`);
 check('ball stays below ceiling', bounds.maxY <= 3.6, `max y = ${bounds.maxY.toFixed(2)} m`);

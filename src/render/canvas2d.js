@@ -1,4 +1,12 @@
-import { BALL_RADIUS, PLAY_HALF_WIDTH } from '../core/constants.js';
+import { BALL_RADIUS, PLAY_HALF_WIDTH, SWEET_SPOT_Y } from '../core/constants.js';
+import { GOOD_BAND } from '../core/combo.js';
+
+const TIER_SKY = [
+  ['#0b1d33', '#16405e'],
+  ['#0d2436', '#1b5060'],
+  ['#152036', '#3a4a72'],
+  ['#22142c', '#63305a'],
+];
 
 /**
  * Phase 1/2 renderer: a flat 2D projection of the world. Deliberately thin —
@@ -13,7 +21,15 @@ export class Canvas2DRenderer {
     this.height = 0;
     this.groundY = 0;
     this.pxPerMetre = 100;
+    this.pulseAmount = 0;
+    this.pulseTone = 'GOOD';
     this.resize();
+  }
+
+  /** One-shot visual kick from the game layer. */
+  pulse(grade) {
+    this.pulseTone = grade;
+    this.pulseAmount = grade === 'PERFECT' ? 1 : grade === 'GOOD' ? 0.6 : 0.3;
   }
 
   resize() {
@@ -38,18 +54,21 @@ export class Canvas2DRenderer {
     };
   }
 
-  draw(game) {
+  draw(game, dt = 1 / 60) {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.#drawBackground(ctx);
-    this.#drawPlayer(ctx);
+    this.pulseAmount = Math.max(0, this.pulseAmount - dt * 3.4);
+    this.#drawBackground(ctx, game.tierIndex);
+    this.#drawSweetSpot(ctx, game);
+    this.#drawPlayer(ctx, game);
     this.#drawBall(ctx, game.ball);
   }
 
-  #drawBackground(ctx) {
+  #drawBackground(ctx, tierIndex = 0) {
+    const [top, bottom] = TIER_SKY[Math.min(tierIndex, TIER_SKY.length - 1)];
     const sky = ctx.createLinearGradient(0, 0, 0, this.groundY);
-    sky.addColorStop(0, '#0b1d33');
-    sky.addColorStop(1, '#16405e');
+    sky.addColorStop(0, top);
+    sky.addColorStop(1, bottom);
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, this.width, this.groundY);
 
@@ -71,9 +90,28 @@ export class Canvas2DRenderer {
     }
   }
 
-  #drawPlayer(ctx) {
+  /** The timing band — the visual contract behind the combo system. */
+  #drawSweetSpot(ctx, game) {
+    const m = this.pxPerMetre;
+    const top = this.groundY - (SWEET_SPOT_Y + GOOD_BAND) * m;
+    const height = GOOD_BAND * 2 * m;
+    const hot = 0.06 + this.pulseAmount * 0.18;
+    ctx.fillStyle = `rgba(120, 240, 180, ${hot.toFixed(3)})`;
+    ctx.fillRect(0, top, this.width, height);
+    ctx.strokeStyle = `rgba(140, 250, 195, ${(0.18 + this.pulseAmount * 0.5).toFixed(3)})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, this.groundY - SWEET_SPOT_Y * m);
+    ctx.lineTo(this.width, this.groundY - SWEET_SPOT_Y * m);
+    ctx.stroke();
+  }
+
+  #drawPlayer(ctx, game) {
     const px = this.width / 2;
     const m = this.pxPerMetre;
+    // Kick follow-through: the leg swings for ~220ms after contact.
+    const since = game ? game.time - game.lastKickAt : 99;
+    const swing = since >= 0 && since < 0.22 ? Math.sin((since / 0.22) * Math.PI) : 0;
     ctx.strokeStyle = '#eef4ff';
     ctx.lineWidth = Math.max(3, m * 0.045);
     ctx.lineCap = 'round';
@@ -96,11 +134,13 @@ export class Canvas2DRenderer {
     ctx.lineTo(px, y(1.42));
     ctx.lineTo(px + m * 0.34, y(1.14));
     ctx.stroke();
-    // Legs
+    // Legs — the right leg lifts towards the sweet spot as the kick fires.
+    const kneeLift = swing * 0.34;
+    const footLift = swing * SWEET_SPOT_Y;
     ctx.beginPath();
     ctx.moveTo(px - m * 0.2, y(0));
     ctx.lineTo(px, y(0.95));
-    ctx.lineTo(px + m * 0.22, y(0));
+    ctx.lineTo(px + m * (0.22 + swing * 0.18), y(footLift + kneeLift * 0.1));
     ctx.stroke();
   }
 

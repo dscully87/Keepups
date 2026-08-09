@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
-<meta name="theme-color" content="#0b1d33" />
+<meta name="theme-color" content="#08101c" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <title>Project Kick-Up</title>
 <style>
@@ -17,23 +17,88 @@
     overscroll-behavior: none;
   }
   #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #hud {
-    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 18px);
-    left: 0; right: 0; text-align: center; pointer-events: none; color: #fff;
+
+  .hud { position: fixed; pointer-events: none; color: #fff; z-index: 5; }
+
+  #top { top: calc(env(safe-area-inset-top, 0px) + 16px); left: 0; right: 0; text-align: center; }
+  #score { font-size: 15vmin; font-weight: 800; line-height: .95; text-shadow: 0 4px 20px rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
+  #label { font-size: 3.1vmin; letter-spacing: .34em; opacity: .6; text-transform: uppercase; }
+  #combo {
+    margin-top: 1.4vmin; font-size: 4vmin; font-weight: 700; letter-spacing: .12em;
+    color: #ffd54a; text-shadow: 0 0 16px rgba(255,190,40,.55);
+    opacity: 0; transition: opacity .18s ease;
   }
-  #score { font-size: 15vmin; font-weight: 800; line-height: 1; text-shadow: 0 4px 18px rgba(0,0,0,.55); }
-  #label { font-size: 3.4vmin; letter-spacing: .32em; opacity: .65; text-transform: uppercase; }
+
+  #meta {
+    top: calc(env(safe-area-inset-top, 0px) + 16px); left: 0; right: 0;
+    display: flex; justify-content: space-between; padding: 0 5vw;
+    font-size: 3vmin; letter-spacing: .1em; opacity: .78;
+  }
+  #meta span { display: block; font-size: 2.4vmin; letter-spacing: .22em; opacity: .55; text-transform: uppercase; }
+  #tier { font-weight: 700; }
+  #tier[data-level="1"] { color: #7fe0a8; }
+  #tier[data-level="2"] { color: #ffc65c; }
+  #tier[data-level="3"] { color: #ff7a6b; }
+
+  #flash {
+    top: 46%; left: 0; right: 0; text-align: center;
+    font-size: 7vmin; font-weight: 800; letter-spacing: .06em;
+    opacity: 0; transform: translateY(-10px) scale(.92);
+    transition: opacity .18s ease, transform .18s ease;
+    text-shadow: 0 4px 24px rgba(0,0,0,.6);
+  }
+  #flash[data-tone="perfect"] { color: #6ff2b0; }
+  #flash[data-tone="good"]    { color: #d8e6ff; }
+  #flash[data-tone="sloppy"]  { color: #ff8f7a; }
+  #flash[data-tone="tier"]    { color: #ffd54a; font-size: 8.5vmin; }
+
   #hint {
-    position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
-    left: 0; right: 0; text-align: center; color: rgba(255,255,255,.6);
-    font-size: 3.6vmin; letter-spacing: .12em; pointer-events: none;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 26px); left: 0; right: 0; text-align: center;
+    color: rgba(255,255,255,.62); font-size: 3.6vmin; letter-spacing: .16em;
+    transition: opacity .25s ease;
+    animation: breathe 2.4s ease-in-out infinite;
   }
+  @keyframes breathe { 0%,100% { opacity: .45 } 50% { opacity: .9 } }
+
+  #overlay {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; color: #fff;
+    background: radial-gradient(circle at 50% 45%, rgba(6,14,26,.72), rgba(4,8,16,.94));
+    opacity: 0; visibility: hidden; transition: opacity .35s ease, visibility .35s;
+    pointer-events: none;
+  }
+  #overlay.visible { opacity: 1; visibility: visible; }
+  #overlay h1 { margin: 0; font-size: 6vmin; letter-spacing: .3em; opacity: .7; font-weight: 600; }
+  #final-score { font-size: 26vmin; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  #final-meta { font-size: 3.4vmin; opacity: .75; letter-spacing: .08em; }
+  #again { margin-top: 5vmin; font-size: 4vmin; letter-spacing: .22em; opacity: .8; animation: breathe 2s ease-in-out infinite; }
 </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <div id="hud"><div id="score">0</div><div id="label">Keep-ups</div></div>
-  <div id="hint">Tap to kick</div>
+
+  <div class="hud" id="meta">
+    <div><span>Best</span><b id="best">0</b></div>
+    <div><span>Level</span><b id="tier" data-level="0">WARM-UP</b></div>
+    <div><span>Points</span><b id="points">0</b></div>
+  </div>
+
+  <div class="hud" id="top">
+    <div id="score">0</div>
+    <div id="label">Keep-ups</div>
+    <div id="combo"></div>
+  </div>
+
+  <div class="hud" id="flash"></div>
+  <div class="hud" id="hint">Tap to kick</div>
+
+  <div id="overlay">
+    <h1>FULL TIME</h1>
+    <div id="final-score">0</div>
+    <div id="final-meta"></div>
+    <div id="again">TAP TO PLAY AGAIN</div>
+  </div>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>
