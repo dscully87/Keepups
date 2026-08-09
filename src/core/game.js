@@ -158,6 +158,9 @@ export class Game {
       return null;
     }
 
+    // Capture where contact happened *before* the strike; the renderer drains
+    // events after the next simulation step has already moved the ball.
+    const point = { x: b.x, y: b.y, z: b.z };
     const result = this.combo.register(b.y);
     this.score += 1;
 
@@ -172,7 +175,7 @@ export class Game {
     const milestone = isMilestone(this.score);
     this.tuning = tuningFor(this.score, this.tuning.restitution);
 
-    const contact = { ...result, score: this.score, height: b.y, milestone, tier: this.tuning.tier };
+    const contact = { ...result, score: this.score, height: point.y, point, milestone, tier: this.tuning.tier };
     this.emit('kick', contact);
     if (milestone) this.emit('milestone', { tier: this.tuning.tier, score: this.score });
     return contact;

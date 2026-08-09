@@ -3,7 +3,13 @@ import { startServer } from './server.mjs';
 
 const IPHONE_VIEWPORT = { width: 390, height: 844 };
 
-export async function openGame({ headless = true, viewport = IPHONE_VIEWPORT } = {}) {
+/**
+ * Note on rendering: CI has no GPU, so Chromium falls back to SwiftShader
+ * software rasterisation (~3-8 fps at phone resolution). Anything timed here
+ * measures the CPU side of the frame; real-device frame rate is gated in
+ * phase 6 by CPU frame cost plus GPU workload budgets, not by wall-clock fps.
+ */
+export async function openGame({ headless = true, viewport = IPHONE_VIEWPORT, dpr = 1 } = {}) {
   const server = await startServer(0);
   const browser = await chromium.launch({
     headless,
@@ -17,7 +23,7 @@ export async function openGame({ headless = true, viewport = IPHONE_VIEWPORT } =
   });
   const context = await browser.newContext({
     viewport,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: dpr,
     isMobile: true,
     hasTouch: true,
     userAgent:

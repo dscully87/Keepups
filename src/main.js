@@ -1,6 +1,6 @@
 import { Game, STATE } from './core/game.js';
 import { createTapInput } from './core/input.js';
-import { Canvas2DRenderer } from './render/canvas2d.js';
+import { Stage } from './render/three/stage.js';
 
 const canvas = document.getElementById('stage');
 const ui = {
@@ -17,12 +17,12 @@ const ui = {
 };
 
 const game = new Game();
-const renderer = new Canvas2DRenderer(canvas);
+const stage = new Stage(canvas);
 
 createTapInput(canvas, () => game.tap());
 
-window.addEventListener('resize', () => renderer.resize());
-window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 60));
+window.addEventListener('resize', () => stage.resize());
+window.addEventListener('orientationchange', () => setTimeout(() => stage.resize(), 60));
 
 let flashTimer = 0;
 function flash(text, tone) {
@@ -39,18 +39,20 @@ function handleEvents() {
       if (data.grade === 'PERFECT') flash(data.combo >= 4 ? `PERFECT ×${data.multiplier}` : 'PERFECT', 'perfect');
       else if (data.grade === 'GOOD') flash('GOOD', 'good');
       else flash('SCRAPPY', 'sloppy');
-      renderer.pulse(data.grade);
+      stage.onKick(data);
     } else if (type === 'whiff') {
       flash('MISTIMED', 'sloppy');
     } else if (type === 'milestone') {
       flash(data.tier, 'tier');
     } else if (type === 'gameover') {
+      stage.onGameOver();
       ui.overlay.classList.add('visible');
       ui.finalScore.textContent = String(data.score);
       ui.finalMeta.textContent = data.newRecord
         ? `NEW BEST · ${data.points.toLocaleString()} pts · best combo ${data.bestCombo}`
         : `Best ${data.highScore} · ${data.points.toLocaleString()} pts · best combo ${data.bestCombo}`;
     } else if (type === 'start') {
+      stage.onRestart();
       ui.overlay.classList.remove('visible');
     }
   }
@@ -73,9 +75,16 @@ function frame(now) {
   const dt = (now - last) / 1000;
   last = now;
 
+  // Capture/diagnostic tooling drives the stage by hand.
+  if (window.__PAUSE__) {
+    requestAnimationFrame(frame);
+    return;
+  }
+
   game.advance(dt);
   handleEvents();
-  renderer.draw(game, dt);
+  stage.update(game, dt);
+  stage.render();
   syncHud();
 
   if (flashTimer > 0) {
@@ -90,4 +99,4 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.__KICKUP__ = { game, renderer, STATE };
+window.__KICKUP__ = { game, stage, STATE };

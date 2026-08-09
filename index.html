@@ -20,7 +20,7 @@
 
   .hud { position: fixed; pointer-events: none; color: #fff; z-index: 5; }
 
-  #top { top: calc(env(safe-area-inset-top, 0px) + 16px); left: 0; right: 0; text-align: center; }
+  #top { top: calc(env(safe-area-inset-top, 0px) + 74px); left: 0; right: 0; text-align: center; }
   #score { font-size: 15vmin; font-weight: 800; line-height: .95; text-shadow: 0 4px 20px rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
   #label { font-size: 3.1vmin; letter-spacing: .34em; opacity: .6; text-transform: uppercase; }
   #combo {
@@ -99,6 +99,14 @@
     <div id="again">TAP TO PLAY AGAIN</div>
   </div>
 
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

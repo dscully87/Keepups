@@ -82,15 +82,21 @@ check('ball never sinks through the turf', bounds.minY >= 0.109, `min y = ${boun
 check('score accumulated over the run', bounds.score > 50, `${bounds.score} keep-ups`);
 
 // --- rendering ----------------------------------------------------------
+// Read straight out of the GL back buffer immediately after a draw, which
+// works without preserveDrawingBuffer.
 const pixels = await page.evaluate(() => {
-  const c = document.getElementById('stage');
-  const ctx = c.getContext('2d');
-  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  const { stage } = window.__KICKUP__;
+  stage.render();
+  const gl = stage.renderer.getContext();
+  const w = gl.drawingBufferWidth;
+  const h = gl.drawingBufferHeight;
+  const buf = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
   const seen = new Set();
-  for (let i = 0; i < d.length; i += 4 * 997) seen.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
-  return seen.size;
+  for (let i = 0; i < buf.length; i += 4 * 997) seen.add(`${buf[i]},${buf[i + 1]},${buf[i + 2]}`);
+  return { colours: seen.size, w, h };
 });
-check('canvas renders a non-trivial image', pixels > 8, `${pixels} distinct sampled colours`);
+check('renders a non-trivial image', pixels.colours > 8, `${pixels.colours} distinct sampled colours at ${pixels.w}x${pixels.h}`);
 check('no console/page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 await close();
