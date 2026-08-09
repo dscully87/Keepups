@@ -17,7 +17,10 @@ const ui = {
 };
 
 const game = new Game();
-const stage = new Stage(canvas);
+// `?q=high|medium|low` forces a quality tier — used by the gates and handy for
+// anyone debugging on a specific device.
+const forced = new URLSearchParams(location.search).get('q');
+const stage = new Stage(canvas, forced ? { quality: forced } : {});
 
 createTapInput(canvas, () => game.tap());
 
@@ -84,7 +87,7 @@ function frame(now) {
   game.advance(dt);
   handleEvents();
   stage.update(game, dt);
-  stage.render();
+  stage.render(dt);
   syncHud();
 
   if (flashTimer > 0) {

@@ -9,7 +9,7 @@ const IPHONE_VIEWPORT = { width: 390, height: 844 };
  * measures the CPU side of the frame; real-device frame rate is gated in
  * phase 6 by CPU frame cost plus GPU workload budgets, not by wall-clock fps.
  */
-export async function openGame({ headless = true, viewport = IPHONE_VIEWPORT, dpr = 1 } = {}) {
+export async function openGame({ headless = true, viewport = IPHONE_VIEWPORT, dpr = 1, quality = null } = {}) {
   const server = await startServer(0);
   const browser = await chromium.launch({
     headless,
@@ -37,7 +37,8 @@ export async function openGame({ headless = true, viewport = IPHONE_VIEWPORT, dp
     if (m.type() === 'error') errors.push(m.text());
   });
 
-  await page.goto(`${server.url}/index.html`, { waitUntil: 'load' });
+  const query = quality ? `?q=${quality}` : '';
+  await page.goto(`${server.url}/index.html${query}`, { waitUntil: 'load' });
   await page.waitForFunction(() => !!window.__KICKUP__, null, { timeout: 20000 });
 
   return {

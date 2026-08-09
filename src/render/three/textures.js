@@ -186,11 +186,11 @@ export function makeTurfTexture(size = 1024, stripes = 10) {
       const n =
         hash2(x * 3.1, y * 3.1) * 0.55 +
         hash2(Math.floor(x / 4), Math.floor(y / 4)) * 0.45;
-      const lift = band ? 1.13 : 0.9;
+      const lift = band ? 1.11 : 0.92;
       const o = (y * size + x) * 4;
-      img.data[o] = clamp255((34 + n * 26) * lift);
-      img.data[o + 1] = clamp255((104 + n * 44) * lift);
-      img.data[o + 2] = clamp255((44 + n * 24) * lift);
+      img.data[o] = clamp255((30 + n * 20) * lift);
+      img.data[o + 1] = clamp255((76 + n * 32) * lift);
+      img.data[o + 2] = clamp255((38 + n * 18) * lift);
       img.data[o + 3] = 255;
     }
   }
@@ -208,9 +208,10 @@ export function makeCrowdTexture(size = 512) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#0a0d14';
+  ctx.fillStyle = '#070911';
   ctx.fillRect(0, 0, size, size);
-  const palette = ['#e8e8ef', '#c33a3a', '#2b4d8f', '#e2b93b', '#3c8d5a', '#8a4bbf', '#1c1f27', '#d9762f'];
+  // Muted and mostly dark: a real crowd at night is a texture, not confetti.
+  const palette = ['#b9bdcc', '#a44a4c', '#4a5f8f', '#b39a55', '#4f7860', '#5d4d74', '#20232c', '#9c6c50'];
   const rows = 46;
   const cols = 76;
   for (let r = 0; r < rows; r += 1) {
@@ -220,7 +221,7 @@ export function makeCrowdTexture(size = 512) {
       const y = (r / rows) * size + (hash2(r, cIdx) - 0.5) * 3;
       ctx.fillStyle = palette[Math.floor(hash2(cIdx * 13, r * 17) * palette.length) % palette.length];
       const w = size / cols;
-      ctx.globalAlpha = 0.55 + hash2(r, cIdx * 2) * 0.45;
+      ctx.globalAlpha = 0.45 + hash2(r, cIdx * 2) * 0.45;
       ctx.fillRect(x, y, w * 0.78, (size / rows) * 0.62);
     }
   }
@@ -228,6 +229,40 @@ export function makeCrowdTexture(size = 512) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+/** Perimeter LED hoardings: bright colour blocks with abstract lettering. */
+export function makeAdBoardTexture(width = 1024) {
+  const h = Math.round(width / 12);
+  const c = document.createElement('canvas');
+  c.width = width;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const panels = ['#0e2f6b', '#c0272d', '#12805a', '#e0a80f', '#1b1d24', '#7a2f8f'];
+  const panelWidth = width / panels.length;
+
+  panels.forEach((colour, i) => {
+    const x = i * panelWidth;
+    ctx.fillStyle = colour;
+    ctx.fillRect(x, 0, panelWidth, h);
+    // Abstract "sponsor" marks — legible as lettering at broadcast distance
+    // without inventing a real brand.
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    const glyphs = 3 + Math.floor(hash2(i * 5, 11) * 4);
+    const gw = panelWidth / (glyphs * 2.4);
+    for (let g = 0; g < glyphs; g += 1) {
+      const gx = x + panelWidth * 0.18 + g * gw * 1.7;
+      const gh = h * (0.3 + hash2(i, g) * 0.16);
+      ctx.fillRect(gx, (h - gh) / 2, gw, gh);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(x, h * 0.86, panelWidth, h * 0.14);
+  });
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
   return tex;
 }
 

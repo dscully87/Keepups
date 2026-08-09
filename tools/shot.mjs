@@ -11,8 +11,9 @@ const name = process.argv[2] || 'shot';
 const afterKickMs = Number(process.argv[3] ?? 60);
 const targetScore = Number(process.argv[4] ?? 14);
 const dpr = Number(process.argv[5] ?? 2);
+const quality = process.argv[6] || 'high';
 
-const { page, errors, close } = await openGame({ dpr });
+const { page, errors, close } = await openGame({ dpr, quality });
 
 const info = await page.evaluate(
   ({ score, afterKick }) => {
@@ -52,7 +53,7 @@ const info = await page.evaluate(
       game.drainEvents();
       stage.update(game, dt);
     }
-    stage.render();
+    stage.render(dt);
 
     return { score: game.score, grade: contact?.grade ?? null, weights: stage.player.weights() };
   },
