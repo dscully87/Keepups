@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BALL_RADIUS } from '../../core/constants.js';
+import { makeFaceTexture } from './textures.js';
 
 /**
  * Procedurally built footballer: a single SkinnedMesh over an authored
@@ -51,7 +52,7 @@ export const SHIN_LENGTH = 0.40;
 /** Ankle → toe, i.e. how far the boot extends past the joint the IK solves for. */
 export const FOOT_LENGTH = Math.hypot(0.042, 0.145);
 
-const MATERIAL_INDEX = { skin: 0, shirt: 1, shorts: 2, socks: 3, boots: 4, hair: 5 };
+const MATERIAL_INDEX = { skin: 0, shirt: 1, shorts: 2, socks: 3, boots: 4, hair: 5, face: 6 };
 
 /**
  * Limbs are lathes, not cylinders.
@@ -103,11 +104,31 @@ const LIMBS = [
     [0.493, 0.098, 0.088],
     [0.510, 0.072, 0.072], // collar
   ] },
+  // The neck is not a dowel between two spheres. It leaves the collar wide,
+  // narrows at the middle, then *flares back out* under the jaw and carries
+  // backwards (dz) — because the head sits forward of the spine, and the gap
+  // that opens behind the jaw is what reads as a jawline from three-quarter.
   { chain: ['chest', 'neck', 'head'], mat: 'skin', radial: THIN_RADIAL, rings: [
-    [0.143, 0.056],
-    [0.170, 0.058],
-    [0.214, 0.062],
-    [0.238, 0.066],
+    [0.140, 0.064, 0.068, -0.004],
+    [0.168, 0.060, 0.064, -0.005],
+    [0.196, 0.058, 0.062, -0.007],
+    [0.224, 0.059, 0.062, -0.009],
+    [0.248, 0.064, 0.064, -0.012],
+    [0.268, 0.069, 0.061, -0.012],
+    // The neck has to run on *inside* the skull. Scooping the mass out from
+    // under the back of the head leaves the nape open to the sky, and a lathe
+    // that stops there presents its flat end cap face-up to four floodlights —
+    // which renders as a bright cream band ringing the whole hairline.
+    [0.290, 0.063, 0.055, -0.016],
+    [0.306, 0.047, 0.043, -0.018],
+  ] },
+  // Crew collar: the shirt has to end *somewhere*, and a rolled band reads as
+  // a neckline where a bare lathe edge reads as a hole.
+  { chain: ['chest', 'neck', 'head'], mat: 'shirt', radial: THIN_RADIAL, rings: [
+    [0.148, 0.070, 0.074],
+    [0.160, 0.078, 0.081],
+    [0.174, 0.076, 0.079],
+    [0.188, 0.063, 0.067], // rolls back in, so the top cap is a thin lip
   ] },
 
   // --- shoulder yoke. Its axis runs almost straight out along x, so here the
@@ -352,9 +373,17 @@ export function createPlayer() {
     ));
   }
 
-  // Head is a squashed sphere rather than a capsule.
-  pieces.push(headGeometry(worldOf('head'), boneIndex.get('head')));
-  pieces.push(hairGeometry(worldOf('head'), boneIndex.get('head')));
+  // Head. The skull carries the face texture on its own material; the nose and
+  // the ears are plain skin so they merge into the body mesh for free.
+  {
+    const head = boneIndex.get('head');
+    const skull = worldOf('head').add(new THREE.Vector3(0, SKULL_RISE, SKULL_Z));
+    pieces.push(headGeometry(skull, head));
+    pieces.push(hairGeometry(skull, head));
+    pieces.push(noseGeometry(skull, head));
+    pieces.push(earGeometry(skull, 1, head));
+    pieces.push(earGeometry(skull, -1, head));
+  }
 
   // The few joints the limb profiles cannot close on their own.
   for (const [bone, radius, matKey] of JOINTS) {
@@ -367,14 +396,17 @@ export function createPlayer() {
     new THREE.MeshStandardMaterial({ color: 0x1b2f6b, roughness: 0.66, metalness: 0.02 }), // shorts
     new THREE.MeshStandardMaterial({ color: 0xe8e9ee, roughness: 0.70, metalness: 0.0 }), // socks
     new THREE.MeshStandardMaterial({ color: 0x14161d, roughness: 0.42, metalness: 0.12 }), // boots
-    new THREE.MeshStandardMaterial({ color: 0x241a15, roughness: 0.85, metalness: 0.0 }), // hair
+    new THREE.MeshStandardMaterial({ color: 0x2b1f18, roughness: 0.88, metalness: 0.0 }), // hair
+    // The face map already carries the skin colour, so the tint stays white —
+    // otherwise the head and the neck would never match.
+    new THREE.MeshStandardMaterial({ color: 0xffffff, map: makeFaceTexture(1024, hairlinePhi), roughness: 0.72, metalness: 0.0 }), // face
   ];
 
   // One SkinnedMesh per kit material, all sharing a single skeleton. Cheaper
   // to reason about than multi-material draw groups on a merged buffer, and
   // five draw calls is not a budget concern.
   const group = new THREE.Group();
-  const byMaterial = [[], [], [], [], [], []];
+  const byMaterial = materials.map(() => []);
   for (const { geometry, materialIndex } of pieces) byMaterial[materialIndex].push(geometry);
 
   const meshes = [];
@@ -896,62 +928,252 @@ function jointGeometry(centre, radius, boneIdx, materialIndex) {
   return rigidTo(geo, boneIdx, materialIndex);
 }
 
-// Skull: an ellipsoid, centred a little above the head bone.
-const SKULL_RISE = 0.04;
-const SKULL = [0.1012, 0.1232, 0.1100]; // semi-axes in x / y / z
-const HAIR_MARGIN = 0.008;
-const HAIRLINE = 0.0; // where the hair stops, measured above the skull centre
-const HAIR_TILT = -12.5 * (Math.PI / 180); // rim high at the brow, low at the nape
+// --- head, face and hair -------------------------------------------------
+
+/** Skull semi-axes (across / up / front-to-back) and where it sits on the bone. */
+const SKULL = [0.1040, 0.1100, 0.1045];
+const SKULL_RISE = 0.046;
+const SKULL_Z = 0.005; // the head rides forward of the neck, not on top of it
+const HEAD_SEGMENTS = [56, 38];
+
+/** `d`-facing lobe, `k` controlling how tightly it is localised. 0 elsewhere. */
+function lobe(nx, ny, nz, dx, dy, dz, k) {
+  const l = Math.hypot(dx, dy, dz);
+  const d = (nx * dx + ny * dy + nz * dz) / l;
+  return d <= 0 ? 0 : Math.pow(d, k);
+}
 
 /**
- * Hair, as a lathe that is the skull's own profile pushed out by a constant
- * margin and stopped at an authored hairline.
+ * The skull, as a displacement field over the unit sphere.
  *
- * The obvious approach — a second head sphere poking through the first —
- * cannot be made clean: two ellipsoids of nearly the same size meet at a
- * grazing angle, and a grazing intersection tessellates into a zigzag however
- * many segments you throw at it. Offsetting the same profile means the two
- * surfaces never intersect at all, and the hairline becomes a rim I place
- * rather than an accident of where two blobs happen to cross.
+ * Working in direction space rather than on a vertex list means the same
+ * function defines the scalp for the hair shell, so the hair can be offset
+ * radially off the *sculpted* head and is guaranteed never to intersect it.
+ *
+ * Two things do most of the work. The jaw scoop removes the mass under the
+ * back of the skull, which is what turns a sphere-on-a-dowel into a jaw with a
+ * neck rising behind it; and flattening the front turns the face into a plane
+ * that the brow, the cheekbones and the chin project from, instead of a bulge
+ * where every feature is equally proud.
  */
-function hairGeometry(centre, boneIdx) {
-  // A skull one margin larger in every axis: strictly containing, so the two
-  // surfaces cannot cross anywhere at all.
-  const semi = SKULL.map((v) => v + HAIR_MARGIN);
-  const rings = [];
-  const STEPS = 11;
-  // Sampling by polar angle rather than by height puts rings where the profile
-  // actually turns, so the crown closes smoothly instead of on a flat disc.
-  const phi0 = Math.asin(THREE.MathUtils.clamp(HAIRLINE / semi[1], -1, 1));
-  for (let i = 0; i <= STEPS; i += 1) {
-    const phi = phi0 + ((Math.PI / 2 - phi0) * i) / STEPS;
-    rings.push([
-      semi[1] * Math.sin(phi) - HAIRLINE,
-      Math.max(semi[0] * Math.cos(phi), 0.003),
-      Math.max(semi[2] * Math.cos(phi), 0.003),
-    ]);
-  }
-  const pivot = new THREE.Vector3(centre.x, centre.y + SKULL_RISE, centre.z);
-  const geo = tubeGeometry(
-    new THREE.Vector3(pivot.x, pivot.y + HAIRLINE, pivot.z),
-    UP,
-    rings,
-    1,
-    FORWARD,
-    30,
-  );
-  // Tip the whole cap back so the rim rides high across the brow and drops to
-  // the nape — a level rim reads as a swimming cap.
-  geo.translate(-pivot.x, -pivot.y, -pivot.z);
-  geo.rotateX(HAIR_TILT);
-  geo.translate(pivot.x, pivot.y, pivot.z);
-  return rigidTo(geo, boneIdx, MATERIAL_INDEX.hair);
+function skullPoint(nx, ny, nz, out) {
+  let px = nx * SKULL[0];
+  let py = ny * SKULL[1];
+  let pz = nz * SKULL[2];
+
+  const under = smootherstep(0.02, 0.95, -ny);
+  const rear = smootherstep(-0.15, 0.80, -nz);
+  const cut = under * rear;
+  // The jaw holds its width down to the gonial angle and only narrows below
+  // it; taper it from the equator and the head comes out as an egg.
+  px *= 1 - 0.16 * smootherstep(0.08, 1.20, -ny);
+  pz *= 1 - 0.52 * cut;
+  py += SKULL[1] * 0.44 * cut;
+
+  const front = smootherstep(0.20, 1.0, nz);
+  pz *= 1 - 0.090 * front;
+
+  // Everything below the eyes gets pushed forward in proportion to how far
+  // down it is. This is the single most important line in the file for how the
+  // head *lights*: every flood is 45° up, so a face that curves under below
+  // the mouth loses all four of them at once and goes black in the shape of a
+  // beard. Shearing the lower face forward keeps that plane near-vertical.
+  pz += 0.022 * Math.max(0, -ny) * front;
+
+  const chin = lobe(nx, ny, nz, 0, -0.72, 0.69, 14);
+  pz += 0.020 * chin;
+  py -= 0.008 * chin;
+
+  const muzzle = lobe(nx, ny, nz, 0, -0.34, 0.94, 5);
+  pz += 0.006 * muzzle;
+
+  // The brow is a bar across the middle of the face, so it is faded out at the
+  // temples rather than left as a lobe that would read as a bump.
+  const brow = lobe(nx, ny, nz, 0, 0.32, 0.95, 6) * (1 - 0.55 * smootherstep(0.28, 0.92, Math.abs(nx)));
+  pz += 0.011 * brow;
+  py += 0.004 * brow;
+
+  const cheek = lobe(nx, ny, nz, 0.66, -0.12, 0.74, 7) + lobe(nx, ny, nz, -0.66, -0.12, 0.74, 7);
+  pz += 0.006 * cheek;
+  px += (nx >= 0 ? 0.004 : -0.004) * cheek;
+
+  // A shallow mound where each eye sits, so the painted eye has something to
+  // catch the light on instead of lying on a flat wall.
+  const eyes = lobe(nx, ny, nz, 0.32, 0.02, 0.95, 14) + lobe(nx, ny, nz, -0.32, 0.02, 0.95, 14);
+  pz += 0.005 * eyes;
+
+  const occiput = lobe(nx, ny, nz, 0, 0.22, -0.97, 3);
+  pz -= 0.010 * occiput;
+
+  out[0] = px;
+  out[1] = py;
+  out[2] = pz;
+  return out;
 }
 
 function headGeometry(centre, boneIdx) {
-  const geo = new THREE.SphereGeometry(1, 30, 22);
-  geo.scale(SKULL[0], SKULL[1], SKULL[2]);
-  geo.translate(centre.x, centre.y + SKULL_RISE, centre.z);
+  const geo = new THREE.SphereGeometry(1, HEAD_SEGMENTS[0], HEAD_SEGMENTS[1]);
+  const pos = geo.getAttribute('position');
+  const p = [0, 0, 0];
+  for (let i = 0; i < pos.count; i += 1) {
+    skullPoint(pos.getX(i), pos.getY(i), pos.getZ(i), p);
+    pos.setXYZ(i, p[0], p[1], p[2]);
+  }
+  geo.translate(centre.x, centre.y, centre.z);
+  return rigidTo(geo, boneIdx, MATERIAL_INDEX.face);
+}
+
+/**
+ * Hairline, as polar angle down from the crown against azimuth away from the
+ * face. This table *is* the haircut: high corners at the temples, a drop in
+ * front of the ear for the sideburn, and a long low line round the nape.
+ */
+const HAIRLINE = [
+  [0, 71], [12, 70], [24, 66], [36, 63], [48, 67], [60, 79], [72, 89],
+  [82, 94], [92, 97], [104, 99], [120, 102], [145, 105], [180, 106],
+];
+const HAIR_THIN = 0.0050; // margin over the scalp at the faded edges
+const HAIR_THICK = 0.0215; // and over the crown
+
+function hairlinePhi(deltaDeg) {
+  const d = Math.abs(deltaDeg);
+  for (let i = 0; i < HAIRLINE.length - 1; i += 1) {
+    if (d <= HAIRLINE[i + 1][0]) {
+      const t = (d - HAIRLINE[i][0]) / (HAIRLINE[i + 1][0] - HAIRLINE[i][0]);
+      const s = t * t * (3 - 2 * t);
+      return HAIRLINE[i][1] * (1 - s) + HAIRLINE[i + 1][1] * s;
+    }
+  }
+  return HAIRLINE[HAIRLINE.length - 1][1];
+}
+
+/**
+ * Hair as a shell offset radially off the scalp, cut at the hairline above.
+ *
+ * Two ellipsoids of nearly the same size meet at a grazing angle, and a
+ * grazing intersection tessellates into a zigzag however many segments you
+ * throw at it — so the shell is built to *contain* the scalp everywhere and
+ * never intersects it at all. The offset is a function of polar angle, not of
+ * distance from the hairline: thin low down and thick over the crown, which is
+ * a faded short crop rather than a bathing cap. The lowest row drops back onto
+ * the scalp, giving the edge a visible lip instead of a paper-thin boundary.
+ */
+function hairGeometry(centre, boneIdx) {
+  const RAD = 52;
+  const ROWS = 13;
+  const D2Rad = Math.PI / 180;
+  const position = [];
+  const uv = [];
+  const index = [];
+  const p = [0, 0, 0];
+
+  const rows = ROWS + 2; // row 0 is the skirt that lands back on the scalp
+  for (let j = 0; j < rows; j += 1) {
+    for (let i = 0; i < RAD; i += 1) {
+      const delta = (i / RAD) * 360 - 180; // 0 = straight ahead
+      const line = hairlinePhi(delta);
+      let phi;
+      let margin;
+      if (j === 0) {
+        // The skirt lands *inside* the scalp. Stopping it flush leaves a
+        // millimetre-wide band of lit skin below the rim, and at a grazing
+        // angle that band picks up a specular highlight and rings the whole
+        // nape in bright cream. Burying it lets the two surfaces cross, and
+        // because the wall is steep the crossing is a clean line.
+        phi = line + 2.5;
+        margin = -0.0025;
+      } else {
+        const t = (j - 1) / ROWS;
+        phi = line * (1 - smootherstep(0, 1, t));
+        margin = HAIR_THIN + (HAIR_THICK - HAIR_THIN) * smootherstep(78, 22, phi);
+        // A little extra height over the front of the crown: a crop has a
+        // front to it, and a perfectly even shell does not.
+        margin += 0.006 * smootherstep(52, 8, phi) * smootherstep(-0.3, 0.7, Math.cos(delta * D2Rad));
+      }
+      const sp = Math.sin(phi * D2Rad);
+      const nx = Math.sin(delta * D2Rad) * sp;
+      const ny = Math.cos(phi * D2Rad);
+      const nz = Math.cos(delta * D2Rad) * sp;
+      skullPoint(nx, ny, nz, p);
+      const len = Math.hypot(p[0], p[1], p[2]) || 1;
+      position.push(
+        centre.x + p[0] * (1 + margin / len),
+        centre.y + p[1] * (1 + margin / len),
+        centre.z + p[2] * (1 + margin / len),
+      );
+      uv.push(i / RAD, j / (rows - 1));
+    }
+  }
+  for (let j = 0; j < rows - 1; j += 1) {
+    for (let i = 0; i < RAD; i += 1) {
+      const a = j * RAD + i;
+      const b = j * RAD + ((i + 1) % RAD);
+      // Rows climb *towards* the crown, so the winding is the mirror of the
+      // one `tubeGeometry` uses; get it backwards and the shell is culled and
+      // you see straight through the hair to the scalp.
+      index.push(a, b, a + RAD, b, b + RAD, a + RAD);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(position.length), 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  return rigidTo(geo, boneIdx, MATERIAL_INDEX.hair);
+}
+
+/**
+ * The nose, swept downwards from the brow with the ring centres running
+ * forward, so the bridge emerges from the face rather than being stuck on it.
+ * `rz` is the half-depth, so the front line of the nose is `dz + rz`.
+ */
+const NOSE_ORIGIN = [0, 0.034, 0.092]; // relative to the skull centre
+const NOSE_RINGS = [
+  [0.000, 0.0075, 0.006, 0.010],
+  [0.012, 0.0085, 0.008, 0.011],
+  [0.024, 0.0105, 0.011, 0.012],
+  [0.036, 0.0135, 0.015, 0.013],
+  [0.046, 0.0170, 0.018, 0.014], // ball of the nose
+  [0.053, 0.0190, 0.016, 0.014], // wings
+  [0.058, 0.0160, 0.013, 0.012],
+  [0.062, 0.0090, 0.008, 0.009],
+];
+
+function noseGeometry(centre, boneIdx) {
+  const origin = centre.clone().add(new THREE.Vector3().fromArray(NOSE_ORIGIN));
+  const geo = tubeGeometry(origin, new THREE.Vector3(0, -1, 0), NOSE_RINGS, 1, FORWARD, 18);
+  return rigidTo(geo, boneIdx, MATERIAL_INDEX.skin);
+}
+
+/**
+ * An ear: a plate squashed flat across the head with the middle of its outer
+ * face pushed back in, which is enough for the shading to find a concha. Half
+ * of it is buried in the skull, so only the rim and the bowl are ever seen.
+ */
+const EAR_AT = [0.0990, -0.012, -0.012];
+const EAR_SEMI = [0.017, 0.036, 0.025];
+
+function earGeometry(centre, side, boneIdx) {
+  const geo = new THREE.SphereGeometry(1, 18, 14);
+  const pos = geo.getAttribute('position');
+  for (let i = 0; i < pos.count; i += 1) {
+    const nx = pos.getX(i);
+    const ny = pos.getY(i);
+    const nz = pos.getZ(i);
+    // Narrower and shallower at the lobe than at the helix.
+    const taper = 1 - 0.30 * smootherstep(0.1, 1.0, -ny);
+    const bowl = Math.max(0, nx) * Math.exp(-(ny * ny * 4.6 + (nz + 0.16) * (nz + 0.16) * 5.0));
+    pos.setXYZ(
+      i,
+      nx * EAR_SEMI[0] * (1 - 0.52 * bowl) * side,
+      ny * EAR_SEMI[1] * (1 + 0.06 * nz),
+      nz * EAR_SEMI[2] * taper,
+    );
+  }
+  geo.rotateX(-0.14);
+  geo.rotateZ(side * 0.10);
+  geo.translate(centre.x + side * EAR_AT[0], centre.y + EAR_AT[1], centre.z + EAR_AT[2]);
   return rigidTo(geo, boneIdx, MATERIAL_INDEX.skin);
 }
 

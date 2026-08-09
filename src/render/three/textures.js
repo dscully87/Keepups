@@ -266,6 +266,240 @@ export function makeAdBoardTexture(width = 1024) {
   return tex;
 }
 
+/**
+ * The face.
+ *
+ * Painted rather than modelled. Eyes, brows and a mouth built out of geometry
+ * cost thousands of triangles and still shade badly at the size a phone
+ * actually draws this head; painted onto the skull's own equirectangular UVs
+ * they stay crisp at the closeup and collapse into readable dark marks — which
+ * is exactly what you want — once the head is thirty pixels tall.
+ *
+ * The whole map is authored in *degrees off the front of the head*, because
+ * that is the only coordinate the geometry and the paint can agree on:
+ *  - yaw  0° is dead ahead (+z), positive towards +x,
+ *  - pitch 0° is the equator of the skull, positive up.
+ * THREE.SphereGeometry puts +z at u = 0.25 and the equator at v = 0.5, and one
+ * degree is W/360 pixels in *both* axes, so the mapping below is exact.
+ */
+export function makeFaceTexture(size = 1024, hairlinePhi = null) {
+  const W = size;
+  const H = size >> 1;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d');
+
+  const PPD = W / 360;
+  const X = (yaw) => W * 0.25 + yaw * PPD;
+  const Y = (pitch) => H * 0.5 - pitch * PPD;
+  const D = (deg) => deg * PPD;
+
+  // The skin material is untextured and flat-coloured; the head has to land on
+  // the same value or the neck seam shows, so the base fill *is* that colour.
+  const SKIN = '#b08054';
+  ctx.fillStyle = SKIN;
+  ctx.fillRect(0, 0, W, H);
+
+  /** Soft elliptical wash — the only shading tool, so nothing has a hard edge. */
+  const wash = (yaw, pitch, rw, rh, colour, alpha) => {
+    ctx.save();
+    ctx.translate(X(yaw), Y(pitch));
+    ctx.scale(1, rh / rw);
+    const r = D(rw);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `rgba(${colour},${alpha})`);
+    g.addColorStop(0.55, `rgba(${colour},${alpha * 0.62})`);
+    g.addColorStop(1, `rgba(${colour},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  };
+
+  const SHADOW = '74,44,26';
+  const WARM = '176,96,60';
+
+  // --- the fade ------------------------------------------------------------
+  // The scalp is darkened to a shaved fade under the authored hairline. The
+  // hair shell is only five millimetres proud at its rim, so without this the
+  // strip of lit scalp peeping out below it reads as a bright seam right round
+  // the nape; with it, the geometry rim and the paint agree and the edge of
+  // the crop reads even where the shell is too thin to cast anything.
+  if (hairlinePhi) {
+    const lineAt = new Float32Array(W);
+    for (let x = 0; x < W; x += 1) {
+      let delta = (x / W) * 360 - 90; // canvas x = W/4 is dead ahead
+      delta = ((delta + 540) % 360) - 180;
+      lineAt[x] = hairlinePhi(delta);
+    }
+    const img = ctx.getImageData(0, 0, W, H);
+    for (let y = 0; y < H; y += 1) {
+      const phi = (y / H) * 180;
+      for (let x = 0; x < W; x += 1) {
+        const t = smoothstep(lineAt[x] + 7.5, lineAt[x] - 2.5, phi);
+        if (t <= 0) continue;
+        const k = 1 - 0.72 * t;
+        const o = (y * W + x) * 4;
+        img.data[o] *= k;
+        img.data[o + 1] *= k;
+        img.data[o + 2] *= k;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  // --- modelling passes, painted before any feature -----------------------
+  wash(0, 26, 32, 14, SHADOW, 0.08);        // under the hairline
+  // Counter-shading under the jaw. Every light in this scene is 45° up, so the
+  // underside of a jaw loses all of them at once; lifting the albedo there by
+  // a sixth is what keeps a modelled jaw from reading as a painted-on beard.
+  wash(0, -35, 24, 14, '236,196,158', 0.17);
+  for (const s of [-1, 1]) {
+    wash(s * 27, -6, 14, 18, SHADOW, 0.12); // the plane turning away at the side
+    wash(s * 15, -14, 11, 9, WARM, 0.15);   // cheek
+    wash(s * 5.5, -9, 5, 9, SHADOW, 0.13);  // side of the nose
+    wash(s * 16, -6.0, 8, 4, SHADOW, 0.10); // under the eye
+    wash(s * 17, 2.5, 10, 6, SHADOW, 0.19); // eye socket, under the brow ridge
+    // A day's stubble along the jaw. It has to stay under about 6% or the
+    // lit half of the face reads as clean and the shaded half as a beard.
+    wash(s * 20, -30, 13, 11, '58,42,30', 0.038);
+  }
+  wash(0, -16, 9, 5, SHADOW, 0.12);         // under the nose
+  wash(0, -32, 12, 9, '58,42,30', 0.038);   // chin, same stubble
+  wash(0, -31, 8, 4, SHADOW, 0.10);         // under the lower lip
+  wash(0, -21, 10, 5, '182,136,102', 0.20); // and a clear upper lip above it
+
+  // --- eyes ---------------------------------------------------------------
+  const EYE_YAW = 17.2;
+  const EYE_PITCH = -2.0;
+  const EYE_HW = 8.8;   // half width
+  const EYE_UP = 4.7;   // lid arch above centre
+  const EYE_DN = 3.3;
+
+  const eyePath = (s) => {
+    const cx = X(s * EYE_YAW);
+    const cy = Y(EYE_PITCH);
+    const hw = D(EYE_HW);
+    const inner = { x: cx - s * hw, y: cy + D(0.9) };
+    const outer = { x: cx + s * hw, y: cy - D(0.7) };
+    ctx.beginPath();
+    ctx.moveTo(inner.x, inner.y);
+    ctx.bezierCurveTo(
+      cx - s * hw * 0.45, cy - D(EYE_UP),
+      cx + s * hw * 0.30, cy - D(EYE_UP * 1.02),
+      outer.x, outer.y,
+    );
+    ctx.bezierCurveTo(
+      cx + s * hw * 0.45, cy + D(EYE_DN * 0.92),
+      cx - s * hw * 0.50, cy + D(EYE_DN),
+      inner.x, inner.y,
+    );
+    ctx.closePath();
+    return { cx, cy, hw, inner, outer };
+  };
+
+  for (const s of [-1, 1]) {
+    const e = eyePath(s);
+    ctx.fillStyle = '#efe9df';
+    ctx.fill();
+
+    // Iris and pupil, clipped to the eye opening so the lid cuts them off at
+    // the top the way a real lid does — a full circle floating in the white is
+    // the single most doll-like thing you can paint.
+    ctx.save();
+    eyePath(s);
+    ctx.clip();
+    const ix = e.cx + s * D(0.5);
+    const iy = e.cy - D(0.3);
+    const ir = D(4.0);
+    const g = ctx.createRadialGradient(ix, iy - ir * 0.3, ir * 0.15, ix, iy, ir);
+    g.addColorStop(0, '#6b4526');
+    g.addColorStop(0.62, '#3f2714');
+    g.addColorStop(1, '#1d1209');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(ix, iy, ir, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0b0704';
+    ctx.beginPath();
+    ctx.arc(ix, iy, ir * 0.44, 0, Math.PI * 2);
+    ctx.fill();
+    // Upper lid casts onto the eyeball.
+    ctx.fillStyle = 'rgba(24,14,8,0.34)';
+    ctx.beginPath();
+    ctx.ellipse(e.cx, e.cy - D(EYE_UP), D(EYE_HW), D(EYE_UP * 0.62), 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    ctx.arc(ix - s * ir * 0.34, iy - ir * 0.42, ir * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Lash line. Thick, dark, and carried past the outer corner: at distance
+    // this is the mark that still says "eye" after everything else has blurred.
+    ctx.save();
+    ctx.strokeStyle = '#160d07';
+    ctx.lineWidth = D(1.9);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(e.inner.x + s * D(0.4), e.inner.y - D(0.6));
+    ctx.bezierCurveTo(
+      e.cx - s * e.hw * 0.45, e.cy - D(EYE_UP * 1.05),
+      e.cx + s * e.hw * 0.30, e.cy - D(EYE_UP * 1.08),
+      e.outer.x + s * D(0.9), e.outer.y + D(0.2),
+    );
+    ctx.stroke();
+    // Lower lid: a light edge, not a line.
+    ctx.strokeStyle = 'rgba(206,150,106,0.55)';
+    ctx.lineWidth = D(0.8);
+    ctx.beginPath();
+    ctx.moveTo(e.inner.x, e.inner.y + D(0.5));
+    ctx.bezierCurveTo(
+      e.cx - s * e.hw * 0.5, e.cy + D(EYE_DN * 1.15),
+      e.cx + s * e.hw * 0.45, e.cy + D(EYE_DN * 1.05),
+      e.outer.x, e.outer.y + D(0.9),
+    );
+    ctx.stroke();
+    ctx.restore();
+
+    // --- brow -------------------------------------------------------------
+    const b0 = { x: X(s * 7.0), y: Y(5.6) };   // inner head, low
+    const b1 = { x: X(s * 17.5), y: Y(9.2) };  // arch
+    const b2 = { x: X(s * 27.5), y: Y(6.6) };  // tail, dropping away
+    ctx.fillStyle = '#241710';
+    ctx.beginPath();
+    ctx.moveTo(b0.x, b0.y + D(2.1));
+    ctx.quadraticCurveTo(b1.x, b1.y + D(2.4), b2.x, b2.y + D(0.8));
+    ctx.quadraticCurveTo(b1.x, b1.y - D(1.5), b0.x, b0.y - D(1.2));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // --- mouth --------------------------------------------------------------
+  const MP = -28.5;
+  const MW = 11.0;
+  ctx.save();
+  ctx.strokeStyle = '#472418';
+  ctx.lineWidth = D(1.8);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(X(-MW), Y(MP + 0.5));
+  ctx.bezierCurveTo(X(-MW * 0.35), Y(MP - 1.1), X(MW * 0.35), Y(MP - 1.1), X(MW), Y(MP + 0.5));
+  ctx.stroke();
+  ctx.restore();
+  wash(0, MP - 2.8, 8.5, 3.2, '198,132,102', 0.34);  // lower lip catching light
+  wash(0, MP + 2.4, 8.0, 2.4, '150,92,62', 0.26);    // upper lip, in shadow
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
 /** Soft radial sprite used for dust, grass motes and light bloom points. */
 export function makeSpriteTexture(size = 64, hardness = 0.35) {
   const c = document.createElement('canvas');
