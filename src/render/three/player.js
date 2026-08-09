@@ -79,30 +79,40 @@ const LIMB_RADIAL = 26;
 const THIN_RADIAL = 22;
 
 const LIMBS = [
-  // --- torso: elliptical throughout, wider in x than z, so it reads as a
-  // chest rather than a pipe. Waist at the spine, widest at the chest.
+  // --- torso.
+  //
+  // Two things stop this reading as a torso-shaped pipe. The section is a
+  // *superellipse*, not an ellipse (`mod.power` below): a chest has a flat
+  // frontal plane with the mass carried out to the lats, and a plain ellipse
+  // lathed through a maximum domes that plane into two soft breasts. And the
+  // ring centres carry a `dz` spine curve — lumbar hollow at the waist, the
+  // thoracic mass swung back behind it — so the profile is an S from the side
+  // rather than a plank. Front line (dz+rz) is held near-constant from the
+  // waist to the collarbone: that is the flat sternum. Back line (dz−rz) does
+  // all the moving.
+  //
   // The torso is one continuous lathe over the whole spine, not a stack of
   // per-bone slices. Slices leave two problems: the flat caps where they abut
   // draw a hard line across the chest, and the skin weights restart at every
   // boundary, so the mesh creases there whenever the spine bends. Ring t is in
   // metres above the first bone in the chain.
-  { chain: ['hips', 'spine', 'chest', 'neck'], mat: 'shirt', radial: TORSO_RADIAL, rings: [
-    [-0.046, 0.176, 0.134], // hem, draped over the top of the hips
-    [-0.028, 0.168, 0.128],
-    [-0.007, 0.156, 0.118],
-    [0.021, 0.147, 0.111],
-    [0.084, 0.142, 0.107],
-    [0.140, 0.142, 0.106], // waist — narrowest point of the torso
-    [0.190, 0.150, 0.110],
-    [0.244, 0.166, 0.118],
-    [0.296, 0.183, 0.125],
-    [0.340, 0.193, 0.129],
-    [0.374, 0.197, 0.129], // widest — lats and pecs
-    [0.411, 0.192, 0.124],
-    [0.445, 0.185, 0.118],
-    [0.473, 0.152, 0.107], // trapezius sloping into the neck
-    [0.493, 0.098, 0.088],
-    [0.510, 0.072, 0.072], // collar
+  { chain: ['hips', 'spine', 'chest', 'neck'], mat: 'shirt', radial: TORSO_RADIAL, mod: { power: 0.87 }, rings: [
+    [-0.046, 0.176, 0.134, 0.000], // hem, draped over the top of the hips
+    [-0.028, 0.168, 0.128, 0.002],
+    [-0.007, 0.156, 0.118, 0.004],
+    [0.021, 0.147, 0.112, 0.006],
+    [0.084, 0.142, 0.108, 0.009],
+    [0.140, 0.142, 0.106, 0.010], // waist — narrowest, and the lumbar hollow
+    [0.190, 0.152, 0.108, 0.009],
+    [0.244, 0.172, 0.112, 0.005],
+    [0.296, 0.191, 0.118, 0.000],
+    [0.340, 0.202, 0.123, -0.005],
+    [0.374, 0.207, 0.125, -0.008], // widest — lats; the sternum stays put
+    [0.411, 0.200, 0.122, -0.010],
+    [0.445, 0.190, 0.117, -0.011],
+    [0.473, 0.154, 0.107, -0.010], // trapezius sloping into the neck
+    [0.493, 0.099, 0.089, -0.008],
+    [0.510, 0.073, 0.073, -0.006], // collar
   ] },
   // The neck is not a dowel between two spheres. It leaves the collar wide,
   // narrows at the middle, then *flares back out* under the jaw and carries
@@ -124,11 +134,14 @@ const LIMBS = [
   ] },
   // Crew collar: the shirt has to end *somewhere*, and a rolled band reads as
   // a neckline where a bare lathe edge reads as a hole.
-  { chain: ['chest', 'neck', 'head'], mat: 'shirt', radial: THIN_RADIAL, rings: [
-    [0.148, 0.070, 0.074],
-    [0.160, 0.078, 0.081],
-    [0.174, 0.076, 0.079],
-    [0.188, 0.063, 0.067], // rolls back in, so the top cap is a thin lip
+  // It carries the same superellipse and the same backward set as the torso
+  // collar it grows out of, so the two stay concentric instead of the shirt
+  // shouldering its way through the band at the diagonals.
+  { chain: ['chest', 'neck', 'head'], mat: 'shirt', radial: THIN_RADIAL, mod: { power: 0.87 }, rings: [
+    [0.148, 0.072, 0.076, -0.007],
+    [0.160, 0.081, 0.084, -0.007],
+    [0.174, 0.079, 0.082, -0.006],
+    [0.188, 0.065, 0.069, -0.005], // rolls back in, so the top cap is a thin lip
   ] },
 
   // --- shoulder yoke. Its axis runs almost straight out along x, so here the
@@ -177,23 +190,33 @@ const LIMBS = [
 
   // --- shorts. One wide pelvic block, widest at the greater trochanter, with
   // the leg tubes emerging out of it rather than butting into its side.
+  // The whole block is set back (`dz`) below the waistband, so the seat is the
+  // furthest-back point of the body and the glute reads as pelvis rather than
+  // as a lobe stuck onto the back of a tube. Above the hem it comes forward
+  // again to sit inside the shirt's lumbar hollow.
   { a: 'hips', b: 'spine', mat: 'shorts', radial: TORSO_RADIAL, rings: [
-    [-1.30, 0.014, 0.013],
-    [-1.22, 0.062, 0.054],
-    [-1.10, 0.128, 0.104],
-    [-0.97, 0.172, 0.124],
-    [-0.83, 0.191, 0.130],
-    [-0.68, 0.196, 0.133], // hips at their widest
-    [-0.57, 0.194, 0.132],
-    [-0.45, 0.185, 0.128],
-    [-0.33, 0.167, 0.121], // from here up it hides under the shirt hem
-    [-0.20, 0.155, 0.114],
-    [-0.05, 0.145, 0.110],
-    [0.12, 0.138, 0.104],
-    [0.20, 0.104, 0.080],
-    [0.24, 0.044, 0.036],
+    [-1.30, 0.014, 0.013, 0.000],
+    [-1.22, 0.062, 0.054, -0.004],
+    [-1.10, 0.128, 0.104, -0.010],
+    [-0.97, 0.172, 0.124, -0.014],
+    [-0.83, 0.191, 0.132, -0.016],
+    [-0.68, 0.196, 0.135, -0.015], // hips at their widest, seat at its fullest
+    [-0.57, 0.194, 0.133, -0.012],
+    [-0.45, 0.185, 0.128, -0.008],
+    [-0.33, 0.167, 0.121, -0.004], // from here up it hides under the shirt hem
+    [-0.20, 0.155, 0.114, 0.000],
+    [-0.05, 0.145, 0.110, 0.004],
+    [0.12, 0.138, 0.104, 0.008],
+    [0.20, 0.104, 0.080, 0.009],
+    [0.24, 0.044, 0.036, 0.010],
   ] },
-  { a: 'thighL', b: 'shinL', mat: 'shorts', radial: LIMB_RADIAL, rings: [
+  // The top of the shorts leg is held partly on the *pelvis* (`root`), not
+  // wholly on the thigh. Weight it all to the thigh and a raised knee swings
+  // the entire seat of the shorts up with it, which balloons into a dark lump
+  // over the hip; splitting it lets the leg swing inside a waistband that
+  // stays where the hips are.
+  { a: 'thighL', b: 'shinL', mat: 'shorts', radial: LIMB_RADIAL,
+    root: { bone: 'hips', from: 0.16, to: -0.06, max: 0.66 }, rings: [
     // The top of the leg is far deeper than it is wide and sits back, so it
     // carries the glute down into the thigh instead of leaving it as a lobe
     // hanging off the back of an otherwise round tube.
@@ -207,21 +230,31 @@ const LIMBS = [
     [0.430, 0.0935],
     [0.470, 0.0930],
     [0.500, 0.1000], // flared leg opening
-    [0.525, 0.0970],
+    // ...which then rolls back *under* itself, finishing inside the thigh.
+    // A lathe that simply stops at its widest presents a full disc of cap
+    // around the leg, and the moment the knee lifts towards camera that disc
+    // is a hard elliptical rim floating in mid-air around the thigh.
+    [0.522, 0.0985],
+    [0.538, 0.0910],
+    [0.548, 0.0830],
   ] },
-  { a: 'thighL', b: 'shinL', mat: 'skin', radial: LIMB_RADIAL, rings: [
-    [0.45, 0.089],
-    [0.60, 0.086],
-    [0.74, 0.081],
-    [0.87, 0.0775], // vastus medialis, low and inboard
-    [1.00, 0.072],
-    [1.06, 0.070],
-  ] },
-  { a: 'shinL', b: 'footL', mat: 'skin', radial: LIMB_RADIAL, rings: [
-    [-0.06, 0.0685],
-    [0.00, 0.0715],
-    [0.07, 0.0740],
-    [0.16, 0.0745],
+  // Thigh, knee and upper shin as ONE lathe. Two lathes overlapping across the
+  // knee cannot be kept nested once the joint bends — the thigh piece hands
+  // only half its weight to the shin while the shin piece is fully on it, so
+  // they slide through each other and the intersection draws a hard ring right
+  // across the knee. One surface with a continuous handoff has nothing to
+  // cross. The `handoff` third value is where it becomes fully the shin's.
+  { a: 'thighL', b: 'shinL', mat: 'skin', radial: LIMB_RADIAL, handoff: [0.62, 1.00, 1.22], rings: [
+    [0.430, 0.0905],
+    [0.560, 0.0875],
+    [0.700, 0.0835],
+    [0.820, 0.0795, 0.0800, 0.002], // vastus medialis, low and inboard
+    [0.905, 0.0745, 0.0765, 0.004], // the tuck above the knee
+    [0.960, 0.0715, 0.0750, 0.006],
+    [1.000, 0.0710, 0.0755, 0.008], // patella, carried forward off the joint
+    [1.045, 0.0722, 0.0758, 0.007],
+    [1.090, 0.0745, 0.0755, 0.002],
+    [1.170, 0.0760, 0.0750, -0.001], // and on down, to finish under the sock
   ] },
   { a: 'shinL', b: 'footL', mat: 'socks', radial: LIMB_RADIAL, rings: [
     [0.11, 0.0700], // starts under the skin of the shin, then swells past it
@@ -260,18 +293,49 @@ const BOOT_RINGS = [
   [0.254, 0.012, 0.008, -0.031],
 ];
 
-/** The hand: an oversized mitt swept on past the wrist, thin across the body
- * and broad front-to-back, the way a hand hangs. */
+/**
+ * The hand.
+ *
+ * A smooth teardrop of the right size is still a paddle: at three-quarter the
+ * arm reads as ending in a spoon. Four things turn it into a hand, none of
+ * them costing more than a few hundred triangles:
+ *
+ *  - a *superelliptical* section (`power` well under 1), so the palm and the
+ *    back of the hand are flat planes with an edge between them, not a tube;
+ *  - a knuckle line that is the widest point, with a break behind it;
+ *  - a longitudinal crease down the middle of both flat faces over the finger
+ *    half only — a mitten split. Two finger lobes modelled as separate lathes
+ *    would leave the palm's end cap exposed between them; a crease in one
+ *    surface has no cap to hide;
+ *  - a medial curl, because a relaxed hand is never a flat plane, and a thumb
+ *    swept off the radial side on its own axis. The thumb is what actually
+ *    says "hand" in silhouette.
+ *
+ * Columns here run [t, half-width, half-depth, dz, medial curl, crease depth].
+ */
 const HAND_RINGS = [
-  [-0.012, 0.029, 0.030],
-  [0.000, 0.031, 0.033],
-  [0.024, 0.033, 0.043],
-  [0.056, 0.034, 0.050], // knuckles
-  [0.092, 0.033, 0.051],
-  [0.122, 0.030, 0.046],
-  [0.142, 0.022, 0.033],
-  [0.152, 0.011, 0.016],
-  [0.157, 0.004, 0.006],
+  [-0.016, 0.026, 0.028, 0, 0.000, 0.00],
+  [0.000, 0.029, 0.033, 0, 0.000, 0.00],
+  [0.018, 0.033, 0.044, 0, 0.001, 0.02],
+  [0.038, 0.036, 0.052, 0, 0.003, 0.10],
+  [0.052, 0.037, 0.056, 0, 0.006, 0.20], // knuckles — the widest point
+  [0.068, 0.035, 0.054, 0, 0.010, 0.30], // the break behind them
+  [0.094, 0.033, 0.052, 0, 0.016, 0.34],
+  [0.118, 0.030, 0.048, 0, 0.021, 0.34],
+  [0.136, 0.026, 0.040, 0, 0.026, 0.32],
+  [0.148, 0.018, 0.026, 0, 0.029, 0.26],
+  [0.155, 0.008, 0.011, 0, 0.031, 0.18],
+];
+const HAND_MOD = { power: 0.70, creaseWidth: 0.30 };
+
+/** The thumb, swept forward off the radial edge of the palm. */
+const THUMB_RINGS = [
+  [0.000, 0.0140, 0.0140],
+  [0.020, 0.0170, 0.0170],
+  [0.038, 0.0176, 0.0176],
+  [0.054, 0.0166, 0.0166],
+  [0.066, 0.0130, 0.0130],
+  [0.074, 0.0058, 0.0058],
 ];
 
 /**
@@ -325,7 +389,7 @@ export function createPlayer() {
     if (limb.chain) {
       const chain = limb.chain.map(worldOf);
       pieces.push(chainGeometry(
-        tubeGeometry(chain[0], UP, limb.rings, 1, FORWARD, limb.radial),
+        tubeGeometry(chain[0], UP, limb.rings, 1, FORWARD, limb.radial, limb.mod),
         chain,
         limb.chain.map((n) => boneIndex.get(n)),
         MATERIAL_INDEX[limb.mat],
@@ -348,6 +412,11 @@ export function createPlayer() {
           boneIndex.get(from),
           boneIndex.get(to),
           MATERIAL_INDEX[limb.mat],
+          {
+            mod: limb.mod,
+            handoff: limb.handoff,
+            root: limb.root && { ...limb.root, index: boneIndex.get(side(limb.root.bone)) },
+          },
         ),
       );
     }
@@ -358,9 +427,32 @@ export function createPlayer() {
   for (const side of ['L', 'R']) {
     const wrist = worldOf(`hand${side}`);
     const down = wrist.clone().sub(worldOf(`fore${side}`)).normalize();
+    const hand = boneIndex.get(`hand${side}`);
+    // The swept frame comes out pointing the same way in world space on both
+    // arms, so "towards the body" is +x of the frame on one side and −x on the
+    // other. Everything asymmetric about a hand — the curl, the thumb — is
+    // signed by this rather than mirrored, which keeps the winding intact.
+    const frame = frameFor(down, FORWARD);
+    const inward = side === 'L' ? 1 : -1;
     pieces.push(rigidTo(
-      tubeGeometry(wrist, down, HAND_RINGS, 1, FORWARD, THIN_RADIAL),
-      boneIndex.get(`hand${side}`),
+      tubeGeometry(wrist, down, HAND_RINGS, 1, FORWARD, THIN_RADIAL, { ...HAND_MOD, sideSign: inward }),
+      hand,
+      MATERIAL_INDEX.skin,
+    ));
+    // The thumb starts buried near the front edge of the palm and climbs out
+    // through its flat face, so the web is a merge rather than a butt joint.
+    const thumbFrom = wrist.clone()
+      .addScaledVector(down, 0.022)
+      .addScaledVector(frame.z, 0.028)
+      .addScaledVector(frame.x, inward * 0.004);
+    const thumbAxis = new THREE.Vector3()
+      .addScaledVector(down, 0.55)
+      .addScaledVector(frame.z, 0.78)
+      .addScaledVector(frame.x, inward * 0.12)
+      .normalize();
+    pieces.push(rigidTo(
+      tubeGeometry(thumbFrom, thumbAxis, THUMB_RINGS, 1, UP, 16),
+      hand,
       MATERIAL_INDEX.skin,
     ));
 
@@ -395,7 +487,10 @@ export function createPlayer() {
     new THREE.MeshStandardMaterial({ color: 0xe8e9ee, roughness: 0.60, metalness: 0.02 }), // shirt
     new THREE.MeshStandardMaterial({ color: 0x1b2f6b, roughness: 0.66, metalness: 0.02 }), // shorts
     new THREE.MeshStandardMaterial({ color: 0xe8e9ee, roughness: 0.70, metalness: 0.0 }), // socks
-    new THREE.MeshStandardMaterial({ color: 0x14161d, roughness: 0.42, metalness: 0.12 }), // boots
+    // Football boots, not patent loafers: a modern synthetic upper has a
+    // broad, low sheen, and at 0.42 roughness these were throwing a hard
+    // specular disc that read as polished dress leather.
+    new THREE.MeshStandardMaterial({ color: 0x191c25, roughness: 0.68, metalness: 0.0 }), // boots
     new THREE.MeshStandardMaterial({ color: 0x2b1f18, roughness: 0.88, metalness: 0.0 }), // hair
     // The face map already carries the skin colour, so the tint stays white —
     // otherwise the head and the neck would never match.
@@ -757,12 +852,22 @@ function frameFor(axis, hint) {
  * keeps a sleeve hem or a shirt hem a crisp edge under smooth shading instead
  * of rolling into a bulb.
  */
-function tubeGeometry(origin, axis, rings, unit, hint, radial) {
+function tubeGeometry(origin, axis, rings, unit, hint, radial, mod) {
   const frame = frameFor(axis, hint || FORWARD);
   const ts = rings.map((r) => r[0]);
   const fx = monotoneSpline(ts, rings.map((r) => r[1]));
   const fz = monotoneSpline(ts, rings.map((r) => (r.length > 2 ? r[2] : r[1])));
   const fd = monotoneSpline(ts, rings.map((r) => (r.length > 3 ? r[3] : 0)));
+  // Columns 4 and 5 are only authored by the hand: a sideways shift of the
+  // ring centre, and the depth of a crease cut into the two flat faces.
+  const fdx = monotoneSpline(ts, rings.map((r) => (r.length > 4 ? r[4] : 0)));
+  const fcr = monotoneSpline(ts, rings.map((r) => (r.length > 5 ? r[5] : 0)));
+  // power < 1 turns the elliptical section into a superellipse: flat faces
+  // front and back with the mass pushed out to the sides. That is the
+  // difference between a pec and a breast, and between a palm and a spoon.
+  const power = mod?.power ?? 1;
+  const creaseW = mod?.creaseWidth ?? 0.30;
+  const sideSign = mod?.sideSign ?? 1;
 
   const samples = [];
   for (let i = 0; i < ts.length - 1; i += 1) {
@@ -787,21 +892,33 @@ function tubeGeometry(origin, axis, rings, unit, hint, radial) {
   const tSpan = samples[samples.length - 1] - tFirst || 1;
 
   const ringAt = (t) => {
-    c.copy(origin).addScaledVector(axis, t * unit).addScaledVector(frame.z, fd(t));
-    return { rx: Math.max(fx(t), 0.0008), rz: Math.max(fz(t), 0.0008) };
+    c.copy(origin)
+      .addScaledVector(axis, t * unit)
+      .addScaledVector(frame.z, fd(t))
+      .addScaledVector(frame.x, fdx(t) * sideSign);
+    return { rx: Math.max(fx(t), 0.0008), rz: Math.max(fz(t), 0.0008), cr: Math.max(fcr(t), 0) };
   };
-  const emit = (rx, rz, j) => {
+  const emit = (rx, rz, cr, j) => {
+    let u = cos[j];
+    let v = sin[j];
+    if (power !== 1) {
+      u = Math.sign(u) * Math.abs(u) ** power;
+      v = Math.sign(v) * Math.abs(v) ** power;
+    }
+    // The crease is a valley across the middle of each flat face, so it is
+    // localised on sin — which is zero exactly where those faces are.
+    if (cr > 0) u *= 1 - cr * Math.exp(-(sin[j] * sin[j]) / (creaseW * creaseW));
     position.push(
-      c.x + frame.x.x * rx * cos[j] + frame.z.x * rz * sin[j],
-      c.y + frame.x.y * rx * cos[j] + frame.z.y * rz * sin[j],
-      c.z + frame.x.z * rx * cos[j] + frame.z.z * rz * sin[j],
+      c.x + frame.x.x * rx * u + frame.z.x * rz * v,
+      c.y + frame.x.y * rx * u + frame.z.y * rz * v,
+      c.z + frame.x.z * rx * u + frame.z.z * rz * v,
     );
   };
 
   for (const t of samples) {
-    const { rx, rz } = ringAt(t);
+    const { rx, rz, cr } = ringAt(t);
     for (let j = 0; j < radial; j += 1) {
-      emit(rx, rz, j);
+      emit(rx, rz, cr, j);
       uv.push(j / radial, (t - tFirst) / tSpan);
     }
   }
@@ -816,12 +933,12 @@ function tubeGeometry(origin, axis, rings, unit, hint, radial) {
   }
 
   for (const [t, isStart] of [[samples[0], true], [samples[samples.length - 1], false]]) {
-    const { rx, rz } = ringAt(t);
+    const { rx, rz, cr } = ringAt(t);
     const base = position.length / 3;
     position.push(c.x, c.y, c.z);
     uv.push(0.5, 0.5);
     for (let j = 0; j < radial; j += 1) {
-      emit(rx, rz, j);
+      emit(rx, rz, cr, j);
       uv.push(0.5 + 0.5 * cos[j], 0.5 + 0.5 * sin[j]);
     }
     for (let j = 0; j < radial; j += 1) {
@@ -847,29 +964,43 @@ function tubeGeometry(origin, axis, rings, unit, hint, radial) {
  * the far joint blend partly onto the child bone. That soft handover is what
  * stops the knee and elbow from creasing.
  */
-function limbGeometry(a, b, rings, radial, hint, boneA, boneB, materialIndex) {
+function limbGeometry(a, b, rings, radial, hint, boneA, boneB, materialIndex, opts = {}) {
   const dir = new THREE.Vector3().subVectors(b, a);
   const fullLength = dir.length();
   const axis = dir.clone().normalize();
-  const geo = tubeGeometry(a, axis, rings, fullLength, hint, radial);
+  const geo = tubeGeometry(a, axis, rings, fullLength, hint, radial, opts.mod);
 
   const pos = geo.getAttribute('position');
   const count = pos.count;
   const skinIndex = new Uint16Array(count * 4);
   const skinWeight = new Float32Array(count * 4);
   const p = new THREE.Vector3();
+  // [start of the handover, the halfway point, where it becomes wholly the
+  // child's]. A piece that runs past the far joint needs the third value, or
+  // its far end stays half on the parent and slides through whatever else is
+  // fully skinned to the child.
+  const [h0, h1, h2] = opts.handoff || [0.62, 1.0, null];
+  const root = opts.root;
 
   for (let i = 0; i < count; i += 1) {
-    // Weights are always measured along the *full* bone span, so adjacent
-    // slices of one limb deform identically and never split apart.
+    // Weights are measured along the *full* bone span, so adjacent slices of
+    // one limb deform identically and never split apart. Only a piece that
+    // deliberately overruns the joint is allowed past t = 1.
     p.fromBufferAttribute(pos, i).sub(a);
-    const t = THREE.MathUtils.clamp(p.dot(axis) / fullLength, 0, 1);
-    // Hand over to the child bone only across the last quarter of the limb.
-    const wChild = smootherstep(0.62, 1.0, t) * 0.5;
+    const raw = p.dot(axis) / fullLength;
+    const t = h2 === null ? THREE.MathUtils.clamp(raw, 0, 1) : Math.max(0, raw);
+    let wChild = smootherstep(h0, h1, t) * 0.5;
+    if (h2 !== null) wChild += smootherstep(h1, h2, t) * 0.5;
+    const wRoot = root ? smootherstep(root.from, root.to, t) * root.max : 0;
+    const rest = 1 - wRoot;
     skinIndex[i * 4] = boneA;
     skinIndex[i * 4 + 1] = boneB;
-    skinWeight[i * 4] = 1 - wChild;
-    skinWeight[i * 4 + 1] = wChild;
+    skinWeight[i * 4] = (1 - wChild) * rest;
+    skinWeight[i * 4 + 1] = wChild * rest;
+    if (root) {
+      skinIndex[i * 4 + 2] = root.index;
+      skinWeight[i * 4 + 2] = wRoot;
+    }
   }
   geo.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
   geo.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
@@ -1208,12 +1339,19 @@ function buildIdleClip() {
 
     // Arms already hang in the bind pose. Positive Z flares the +x arm
     // outward, negative X bends either elbow forward.
+    //
+    // The bind pose alone already carries the arm ~8° out; adding another 9°
+    // on top left them splayed and rod-straight, which is how a shop-window
+    // dummy stands. An athlete at rest keeps the upper arm barely off the
+    // ribs and carries the load in a bent elbow, so the flare comes almost
+    // all the way off and the forearms angle back *inward* (negative Z on the
+    // +x side) to bring the hands in beside the hips.
     track('clavL', t, [[0, 0, -3], [0, 0, -2], [0, 0, -4], [0, 0, -2], [0, 0, -3]]),
-    track('armL', t, [[-8, 0, 9], [-11, 0, 12], [-6, 0, 7], [-10, 0, 11], [-8, 0, 9]]),
-    track('foreL', t, [[-26, 0, 5], [-31, 0, 6], [-22, 0, 4], [-30, 0, 6], [-26, 0, 5]]),
+    track('armL', t, [[-4, 0, 3], [-6, 0, 5], [-2, 0, 2], [-5, 0, 4], [-4, 0, 3]]),
+    track('foreL', t, [[-24, 0, -3], [-28, 0, -4], [-21, 0, -2], [-27, 0, -4], [-24, 0, -3]]),
     track('clavR', t, [[0, 0, 3], [0, 0, 2], [0, 0, 4], [0, 0, 2], [0, 0, 3]]),
-    track('armR', t, [[-8, 0, -9], [-10, 0, -11], [-6, 0, -7], [-11, 0, -12], [-8, 0, -9]]),
-    track('foreR', t, [[-26, 0, -5], [-30, 0, -6], [-22, 0, -4], [-31, 0, -6], [-26, 0, -5]]),
+    track('armR', t, [[-4, 0, -3], [-6, 0, -5], [-2, 0, -2], [-5, 0, -4], [-4, 0, -3]]),
+    track('foreR', t, [[-24, 0, 3], [-28, 0, 4], [-21, 0, 2], [-27, 0, 4], [-24, 0, 3]]),
 
     // Kicking leg stays loaded — knee soft, foot just off the turf.
     track('thighL', t, [[-16, 0, -3], [-13, 0, -3], [-18, 0, -4], [-14, 0, -3], [-16, 0, -3]]),
@@ -1242,11 +1380,11 @@ function buildKickClip() {
     // The arm opposite the kicking leg drives forward and up; the near arm
     // swings back and out for balance.
     track('clavL', t, [[0, 0, -8], [0, 0, -12], [0, 0, -8], [0, 0, -4], [0, 0, -3]]),
-    track('armL', t, [[34, 0, 24], [46, 0, 30], [30, 0, 22], [2, 0, 12], [-8, 0, 9]]),
-    track('foreL', t, [[-18, 0, 6], [-14, 0, 7], [-20, 0, 6], [-25, 0, 5], [-26, 0, 5]]),
+    track('armL', t, [[34, 0, 24], [46, 0, 30], [30, 0, 22], [2, 0, 9], [-4, 0, 3]]),
+    track('foreL', t, [[-18, 0, 4], [-14, 0, 5], [-20, 0, 3], [-23, 0, -1], [-24, 0, -3]]),
     track('clavR', t, [[0, 0, 10], [0, 0, 14], [0, 0, 10], [0, 0, 4], [0, 0, 3]]),
-    track('armR', t, [[-48, 0, -20], [-62, 0, -26], [-44, 0, -18], [-16, 0, -11], [-8, 0, -9]]),
-    track('foreR', t, [[-54, 0, -8], [-64, 0, -9], [-48, 0, -7], [-30, 0, -6], [-26, 0, -5]]),
+    track('armR', t, [[-48, 0, -20], [-62, 0, -26], [-44, 0, -18], [-16, 0, -9], [-4, 0, -3]]),
+    track('foreR', t, [[-54, 0, -6], [-64, 0, -7], [-48, 0, -5], [-30, 0, 1], [-24, 0, 3]]),
 
     // Striking leg: contact → follow-through → recovery.
     track('thighL', t, [[-52, 0, -4], [-72, 0, -6], [-46, 0, -5], [-22, 0, -3], [-16, 0, -3]]),
@@ -1267,8 +1405,8 @@ function buildStumbleClip() {
     track('spine', t, [[-1, -2, 0], [8, -6, 0], [12, -8, 0], [11, -7, 0]]),
     track('chest', t, [[-2, -3, 0], [10, -4, 0], [16, -6, 0], [15, -5, 0]]),
     track('head', t, [[6, 2, 0], [18, 4, 0], [26, 6, 0], [24, 5, 0]]),
-    track('armL', t, [[-8, 0, 9], [-16, 0, 18], [-22, 0, 26], [-20, 0, 24]]),
-    track('armR', t, [[-8, 0, -9], [-16, 0, -18], [-22, 0, -26], [-20, 0, -24]]),
+    track('armL', t, [[-4, 0, 3], [-13, 0, 13], [-19, 0, 21], [-17, 0, 19]]),
+    track('armR', t, [[-4, 0, -3], [-13, 0, -13], [-19, 0, -21], [-17, 0, -19]]),
     track('thighL', t, [[-16, 0, -3], [-6, 0, -2], [-2, 0, -1], [-3, 0, -1]]),
     track('shinL', t, [[26, 0, 0], [12, 0, 0], [6, 0, 0], [7, 0, 0]]),
   ]);
