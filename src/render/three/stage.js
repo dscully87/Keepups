@@ -4,7 +4,7 @@ import { createPlayer } from './player.js';
 import { buildStadium } from './stadium.js';
 import { PostChain, detectQuality } from './post.js';
 import { ImpactFX, CameraShake } from './effects.js';
-import { makeTurfTexture } from './textures.js';
+import { makeTurfTexture, loadMaterialMaps } from './textures.js';
 import { SWEET_SPOT_Y } from '../../core/constants.js';
 
 /** The ball plays in front of the player so the boot can reach it. */
@@ -82,7 +82,10 @@ export class Stage {
    */
   #buildLights() {
     // Sky bounce is cool, turf bounce is green — grounds the figure.
-    const hemi = new THREE.HemisphereLight(0x8fb4ff, 0x24421f, 0.26);
+    // A floodlit pitch is a huge lit green reflector, so the fill from below is
+    // strong; at the old 0.26 anything facing down (the underside of the jaw)
+    // went to black and read as a chinstrap beard.
+    const hemi = new THREE.HemisphereLight(0x9bb8ff, 0x56704a, 0.62);
     this.scene.add(hemi);
     this.hemi = hemi;
 
@@ -126,7 +129,17 @@ export class Stage {
     const turf = makeTurfTexture(1024, 10);
     turf.repeat.set(16, 16);
     const geo = new THREE.PlaneGeometry(96, 96);
-    const mat = new THREE.MeshStandardMaterial({ map: turf, roughness: 0.92, metalness: 0.0 });
+    // Blade grain authored in MaterialCraft, tiled far finer than the stripes.
+    const maps = loadMaterialMaps();
+    for (const t of [maps.turfNormal, maps.turfRoughness]) t.repeat.set(220, 220);
+    const mat = new THREE.MeshStandardMaterial({
+      map: turf,
+      normalMap: maps.turfNormal,
+      normalScale: new THREE.Vector2(0.5, 0.5),
+      roughnessMap: maps.turfRoughness,
+      roughness: 1.0,
+      metalness: 0.0,
+    });
     const ground = new THREE.Mesh(geo, mat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;

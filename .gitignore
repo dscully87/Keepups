@@ -2,3 +2,8 @@ node_modules/
 .DS_Store
 shots/
 *.log
+tools/materials/.work/
+video/public/capture/
+video/out/
+video/hyperframes/.hyperframes/
+video/hyperframes/renders/

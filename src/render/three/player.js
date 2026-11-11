@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BALL_RADIUS } from '../../core/constants.js';
-import { makeFaceTexture } from './textures.js';
+import { makeFaceTexture, makeKitTextures, loadMaterialMaps } from './textures.js';
+import { latheField, capsuleField, roundBoxField, meshFields } from './sdf.js';
 
 /**
  * Procedurally built footballer: a single SkinnedMesh over an authored
@@ -52,6 +53,9 @@ export const SHIN_LENGTH = 0.40;
 /** Ankle → toe, i.e. how far the boot extends past the joint the IK solves for. */
 export const FOOT_LENGTH = Math.hypot(0.042, 0.145);
 
+/** One value for every bare-skin surface; the face map is painted to match it. */
+const SKIN_COLOUR = 0xb08054;
+
 const MATERIAL_INDEX = { skin: 0, shirt: 1, shorts: 2, socks: 3, boots: 4, hair: 5, face: 6 };
 
 /**
@@ -74,7 +78,6 @@ const MATERIAL_INDEX = { skin: 0, shirt: 1, shorts: 2, socks: 3, boots: 4, hair:
  * That is the whole trick behind losing the scalloped seams: no shape ever
  * punches through its neighbour, it emerges from it.
  */
-const TORSO_RADIAL = 32;
 const LIMB_RADIAL = 26;
 const THIN_RADIAL = 22;
 
@@ -96,22 +99,29 @@ const LIMBS = [
   // draw a hard line across the chest, and the skin weights restart at every
   // boundary, so the mesh creases there whenever the spine bends. Ring t is in
   // metres above the first bone in the chain.
-  { chain: ['hips', 'spine', 'chest', 'neck'], mat: 'shirt', radial: TORSO_RADIAL, mod: { power: 0.87 }, rings: [
-    [-0.046, 0.176, 0.134, 0.000], // hem, draped over the top of the hips
-    [-0.028, 0.168, 0.128, 0.002],
+  //
+  // Round 4: this lathe is now the *ribcage*, not the whole upper body. It
+  // used to run out to the full shoulder width, which buried half of each
+  // upper arm inside the chest and left the deltoids as plates bolted to the
+  // corners of a box. A ribcage is ~32 cm across; the shoulders are carried
+  // beyond it by the yoke and the deltoid, and the smooth union in sdf.js
+  // fillets the three together, armpit included.
+  { chain: ['hips', 'spine', 'chest', 'neck'], mat: 'shirt', sdf: { k: 0.030, cap: ['flat', 'flat'] }, mod: { power: 0.87 }, rings: [
+    [-0.058, 0.171, 0.131, 0.000], // hem, draped over the top of the hips
+    [-0.028, 0.166, 0.127, 0.002],
     [-0.007, 0.156, 0.118, 0.004],
-    [0.021, 0.147, 0.112, 0.006],
-    [0.084, 0.142, 0.108, 0.009],
-    [0.140, 0.142, 0.106, 0.010], // waist — narrowest, and the lumbar hollow
-    [0.190, 0.152, 0.108, 0.009],
-    [0.244, 0.172, 0.112, 0.005],
-    [0.296, 0.191, 0.118, 0.000],
-    [0.340, 0.202, 0.123, -0.005],
-    [0.374, 0.207, 0.125, -0.008], // widest — lats; the sternum stays put
-    [0.411, 0.200, 0.122, -0.010],
-    [0.445, 0.190, 0.117, -0.011],
-    [0.473, 0.154, 0.107, -0.010], // trapezius sloping into the neck
-    [0.493, 0.099, 0.089, -0.008],
+    [0.021, 0.148, 0.112, 0.006],
+    [0.084, 0.141, 0.107, 0.009],
+    [0.140, 0.139, 0.104, 0.010], // waist — narrowest, and the lumbar hollow
+    [0.190, 0.144, 0.106, 0.009],
+    [0.244, 0.153, 0.111, 0.005],
+    [0.296, 0.161, 0.118, 0.000],
+    [0.340, 0.166, 0.123, -0.005], // lats
+    [0.374, 0.166, 0.125, -0.008], // chest at its deepest; the sternum stays put
+    [0.411, 0.158, 0.121, -0.010],
+    [0.445, 0.140, 0.113, -0.011],
+    [0.473, 0.112, 0.100, -0.010], // trapezius sloping into the neck
+    [0.493, 0.086, 0.085, -0.008],
     [0.510, 0.073, 0.073, -0.006], // collar
   ] },
   // The neck is not a dowel between two spheres. It leaves the collar wide,
@@ -137,7 +147,7 @@ const LIMBS = [
   // It carries the same superellipse and the same backward set as the torso
   // collar it grows out of, so the two stay concentric instead of the shirt
   // shouldering its way through the band at the diagonals.
-  { chain: ['chest', 'neck', 'head'], mat: 'shirt', radial: THIN_RADIAL, mod: { power: 0.87 }, rings: [
+  { chain: ['chest', 'neck', 'head'], mat: 'shirt', radial: THIN_RADIAL, mod: { power: 0.87 }, swatch: [0.25, 0.008], rings: [
     [0.148, 0.072, 0.076, -0.007],
     [0.160, 0.081, 0.084, -0.007],
     [0.174, 0.079, 0.082, -0.006],
@@ -147,45 +157,46 @@ const LIMBS = [
   // --- shoulder yoke. Its axis runs almost straight out along x, so here the
   // local frame puts `rx` vertical and `rz` front-to-back: a shoulder is much
   // deeper than it is tall.
-  { a: 'clavL', b: 'armL', mat: 'shirt', radial: THIN_RADIAL, rings: [
-    [-0.20, 0.062, 0.092],
-    [0.00, 0.070, 0.102],
-    [0.45, 0.076, 0.100],
-    [0.80, 0.082, 0.096],
-    [1.00, 0.084, 0.092],
+  { a: 'clavL', b: 'armL', mat: 'shirt', sdf: { k: 0.034, cap: ['round', 'round'] }, rings: [
+    [-0.20, 0.052, 0.082, -0.008],
+    [0.00, 0.054, 0.088, -0.008],
+    [0.45, 0.052, 0.084, -0.007],
+    [0.80, 0.047, 0.070, -0.004],
+    [1.00, 0.042, 0.058, -0.002],
   ] },
 
   // --- deltoid cap and sleeve. The profile domes over the top of the shoulder
   // (negative t) so no separate sphere is needed to close the joint.
-  { a: 'armL', b: 'foreL', mat: 'shirt', radial: LIMB_RADIAL, rings: [
-    [-0.32, 0.014],
-    [-0.28, 0.040],
-    [-0.22, 0.060],
-    [-0.13, 0.074],
-    [-0.02, 0.080],
-    [0.08, 0.081], // deltoid crown
-    [0.20, 0.077],
-    [0.30, 0.071],
-    [0.40, 0.0665],
-    [0.44, 0.0655], // sleeve hem
+  { a: 'armL', b: 'foreL', mat: 'shirt', sdf: { k: 0.030, cap: ['round', 'flat'] }, rings: [
+    [-0.21, 0.010],
+    [-0.18, 0.030],
+    [-0.13, 0.046],
+    [-0.06, 0.056],
+    [0.02, 0.061],
+    [0.12, 0.0635], // deltoid crown
+    [0.22, 0.0630],
+    [0.32, 0.0615],
+    [0.40, 0.0610],
+    [0.46, 0.0615], // sleeve hem
   ] },
   { a: 'armL', b: 'foreL', mat: 'skin', radial: LIMB_RADIAL, rings: [
-    [0.40, 0.060],
-    [0.50, 0.0632],
-    [0.60, 0.0625], // bicep belly
-    [0.72, 0.056],
-    [0.86, 0.0505],
-    [1.00, 0.048], // elbow
+    [0.36, 0.052],
+    [0.50, 0.0555],
+    [0.60, 0.0550], // bicep belly
+    [0.72, 0.0510],
+    [0.86, 0.0470],
+    [1.00, 0.0450], // elbow
   ] },
   { a: 'foreL', b: 'handL', mat: 'skin', radial: LIMB_RADIAL, rings: [
-    [-0.08, 0.047],
-    [0.00, 0.050],
-    [0.10, 0.055], // flexor mass, high on the forearm
-    [0.22, 0.053],
-    [0.42, 0.045],
-    [0.65, 0.037],
-    [0.85, 0.032],
-    [1.00, 0.031], // wrist
+    [-0.08, 0.044],
+    [0.00, 0.047],
+    [0.10, 0.051], // flexor mass, high on the forearm
+    [0.22, 0.049],
+    [0.42, 0.042],
+    [0.65, 0.035],
+    [0.85, 0.030],
+    [1.00, 0.029, 0.026], // wrist: flatter than it is wide
+    [1.06, 0.027, 0.023],
   ] },
 
   // --- shorts. One wide pelvic block, widest at the greater trochanter, with
@@ -194,7 +205,7 @@ const LIMBS = [
   // furthest-back point of the body and the glute reads as pelvis rather than
   // as a lobe stuck onto the back of a tube. Above the hem it comes forward
   // again to sit inside the shirt's lumbar hollow.
-  { a: 'hips', b: 'spine', mat: 'shorts', radial: TORSO_RADIAL, rings: [
+  { a: 'hips', b: 'spine', mat: 'shorts', sdf: { k: 0.030, cap: ['round', 'round'] }, rings: [
     [-1.30, 0.014, 0.013, 0.000],
     [-1.22, 0.062, 0.054, -0.004],
     [-1.10, 0.128, 0.104, -0.010],
@@ -215,7 +226,7 @@ const LIMBS = [
   // the entire seat of the shorts up with it, which balloons into a dark lump
   // over the hip; splitting it lets the leg swing inside a waistband that
   // stays where the hips are.
-  { a: 'thighL', b: 'shinL', mat: 'shorts', radial: LIMB_RADIAL,
+  { a: 'thighL', b: 'shinL', mat: 'shorts', sdf: { k: 0.026, cap: ['round', 'flat'] },
     root: { bone: 'hips', from: 0.16, to: -0.06, max: 0.66 }, rings: [
     // The top of the leg is far deeper than it is wide and sits back, so it
     // carries the glute down into the thigh instead of leaving it as a lobe
@@ -228,15 +239,8 @@ const LIMBS = [
     [0.240, 0.098, 0.102, -0.006],
     [0.340, 0.096, 0.096],
     [0.430, 0.0935],
-    [0.470, 0.0930],
-    [0.500, 0.1000], // flared leg opening
-    // ...which then rolls back *under* itself, finishing inside the thigh.
-    // A lathe that simply stops at its widest presents a full disc of cap
-    // around the leg, and the moment the knee lifts towards camera that disc
-    // is a hard elliptical rim floating in mid-air around the thigh.
-    [0.522, 0.0985],
-    [0.538, 0.0910],
-    [0.548, 0.0830],
+    [0.470, 0.0940],
+    [0.520, 0.0985], // leg opening: loose, but only just clear of the thigh
   ] },
   // Thigh, knee and upper shin as ONE lathe. Two lathes overlapping across the
   // knee cannot be kept nested once the joint bends — the thigh piece hands
@@ -294,51 +298,6 @@ const BOOT_RINGS = [
 ];
 
 /**
- * The hand.
- *
- * A smooth teardrop of the right size is still a paddle: at three-quarter the
- * arm reads as ending in a spoon. Four things turn it into a hand, none of
- * them costing more than a few hundred triangles:
- *
- *  - a *superelliptical* section (`power` well under 1), so the palm and the
- *    back of the hand are flat planes with an edge between them, not a tube;
- *  - a knuckle line that is the widest point, with a break behind it;
- *  - a longitudinal crease down the middle of both flat faces over the finger
- *    half only — a mitten split. Two finger lobes modelled as separate lathes
- *    would leave the palm's end cap exposed between them; a crease in one
- *    surface has no cap to hide;
- *  - a medial curl, because a relaxed hand is never a flat plane, and a thumb
- *    swept off the radial side on its own axis. The thumb is what actually
- *    says "hand" in silhouette.
- *
- * Columns here run [t, half-width, half-depth, dz, medial curl, crease depth].
- */
-const HAND_RINGS = [
-  [-0.016, 0.026, 0.028, 0, 0.000, 0.00],
-  [0.000, 0.029, 0.033, 0, 0.000, 0.00],
-  [0.018, 0.033, 0.044, 0, 0.001, 0.02],
-  [0.038, 0.036, 0.052, 0, 0.003, 0.10],
-  [0.052, 0.037, 0.056, 0, 0.006, 0.20], // knuckles — the widest point
-  [0.068, 0.035, 0.054, 0, 0.010, 0.30], // the break behind them
-  [0.094, 0.033, 0.052, 0, 0.016, 0.34],
-  [0.118, 0.030, 0.048, 0, 0.021, 0.34],
-  [0.136, 0.026, 0.040, 0, 0.026, 0.32],
-  [0.148, 0.018, 0.026, 0, 0.029, 0.26],
-  [0.155, 0.008, 0.011, 0, 0.031, 0.18],
-];
-const HAND_MOD = { power: 0.70, creaseWidth: 0.30 };
-
-/** The thumb, swept forward off the radial edge of the palm. */
-const THUMB_RINGS = [
-  [0.000, 0.0140, 0.0140],
-  [0.020, 0.0170, 0.0170],
-  [0.038, 0.0176, 0.0176],
-  [0.054, 0.0166, 0.0166],
-  [0.066, 0.0130, 0.0130],
-  [0.074, 0.0058, 0.0058],
-];
-
-/**
  * joint: [bone, radius, materialKey]
  *
  * Only the joints the limb profiles cannot close on their own, and every
@@ -347,14 +306,8 @@ const THUMB_RINGS = [
  * Shoulders, ankles and the waist need no cap at all now.
  */
 const JOINTS = [
-  ['armL', 0.068, 'shirt'],
-  ['armR', 0.068, 'shirt'],
-  ['foreL', 0.046, 'skin'],
-  ['foreR', 0.046, 'skin'],
-  ['handL', 0.028, 'skin'],
-  ['handR', 0.028, 'skin'],
-  ['thighL', 0.072, 'shorts'],
-  ['thighR', 0.072, 'shorts'],
+  ['foreL', 0.043, 'skin'],
+  ['foreR', 0.043, 'skin'],
   ['shinL', 0.068, 'skin'],
   ['shinR', 0.068, 'skin'],
 ];
@@ -385,11 +338,41 @@ export function createPlayer() {
 
   // --- geometry, authored directly in bind-pose world space --------------
   const pieces = [];
+  // Pieces flagged `sdf` are not meshed one by one: they are gathered per kit
+  // material and pulled out together as one filleted surface (see sdf.js).
+  const fields = { shirt: [], shorts: [] };
   for (const limb of LIMBS) {
+    if (limb.sdf && limb.chain) {
+      const chain = limb.chain.map(worldOf);
+      const idx = limb.chain.map((n) => boneIndex.get(n));
+      fields[limb.mat].push(latheField({
+        origin: chain[0], axis: UP, hint: FORWARD, rings: limb.rings, unit: 1,
+        power: limb.mod?.power, ...limb.sdf, weights: (p) => chainWeights(p, chain, idx),
+      }));
+      continue;
+    }
+    if (limb.sdf) {
+      for (const side of [(n) => n, mirrorBone]) {
+        const a = worldOf(side(limb.a));
+        const b = worldOf(side(limb.b));
+        if (side === mirrorBone && a.x === worldOf(limb.a).x && b.x === worldOf(limb.b).x) continue;
+        const axis = new THREE.Vector3().subVectors(b, a);
+        const unit = axis.length();
+        axis.normalize();
+        const boneA = boneIndex.get(side(limb.a));
+        const boneB = boneIndex.get(side(limb.b));
+        const root = limb.root && { ...limb.root, index: boneIndex.get(side(limb.root.bone)) };
+        fields[limb.mat].push(latheField({
+          origin: a, axis, hint: FORWARD, rings: limb.rings, unit, power: limb.mod?.power, ...limb.sdf,
+          weights: (p) => limbWeights(p, a, axis, unit, boneA, boneB, limb.handoff, root),
+        }));
+      }
+      continue;
+    }
     if (limb.chain) {
       const chain = limb.chain.map(worldOf);
       pieces.push(chainGeometry(
-        tubeGeometry(chain[0], UP, limb.rings, 1, FORWARD, limb.radial, limb.mod),
+        swatched(tubeGeometry(chain[0], UP, limb.rings, 1, FORWARD, limb.radial, limb.mod), limb.swatch),
         chain,
         limb.chain.map((n) => boneIndex.get(n)),
         MATERIAL_INDEX[limb.mat],
@@ -434,27 +417,10 @@ export function createPlayer() {
     // signed by this rather than mirrored, which keeps the winding intact.
     const frame = frameFor(down, FORWARD);
     const inward = side === 'L' ? 1 : -1;
-    pieces.push(rigidTo(
-      tubeGeometry(wrist, down, HAND_RINGS, 1, FORWARD, THIN_RADIAL, { ...HAND_MOD, sideSign: inward }),
-      hand,
-      MATERIAL_INDEX.skin,
-    ));
-    // The thumb starts buried near the front edge of the palm and climbs out
-    // through its flat face, so the web is a merge rather than a butt joint.
-    const thumbFrom = wrist.clone()
-      .addScaledVector(down, 0.022)
-      .addScaledVector(frame.z, 0.028)
-      .addScaledVector(frame.x, inward * 0.004);
-    const thumbAxis = new THREE.Vector3()
-      .addScaledVector(down, 0.55)
-      .addScaledVector(frame.z, 0.78)
-      .addScaledVector(frame.x, inward * 0.12)
-      .normalize();
-    pieces.push(rigidTo(
-      tubeGeometry(thumbFrom, thumbAxis, THUMB_RINGS, 1, UP, 16),
-      hand,
-      MATERIAL_INDEX.skin,
-    ));
+    pieces.push({
+      ...rigidTo(handGeometry(wrist, down, frame.z, frame.x.clone().multiplyScalar(inward)), hand, MATERIAL_INDEX.skin),
+      keepNormals: true,
+    });
 
     const ankle = worldOf(`foot${side}`);
     const origin = ankle.clone().add(new THREE.Vector3().fromArray(BOOT_ORIGIN));
@@ -463,6 +429,16 @@ export function createPlayer() {
       boneIndex.get(`foot${side}`),
       MATERIAL_INDEX.boots,
     ));
+  }
+
+  // The shirt and the shorts: one filleted surface each.
+  {
+    const shirt = meshFields(fields.shirt, { cell: 0.0115, weightBlend: 0.024 });
+    projectKitUVs(shirt, SHIRT_UV);
+    pieces.push({ geometry: shirt, materialIndex: MATERIAL_INDEX.shirt, keepNormals: true });
+    const shorts = meshFields(fields.shorts, { cell: 0.0115, weightBlend: 0.020 });
+    projectKitUVs(shorts, SHORTS_UV);
+    pieces.push({ geometry: shorts, materialIndex: MATERIAL_INDEX.shorts, keepNormals: true });
   }
 
   // Head. The skull carries the face texture on its own material; the nose and
@@ -482,19 +458,39 @@ export function createPlayer() {
     pieces.push(jointGeometry(worldOf(bone), radius, boneIndex.get(bone), MATERIAL_INDEX[matKey]));
   }
 
+  const kit = makeKitTextures();
+  const maps = loadMaterialMaps();
+  const cloth = (map, extra = {}) => new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map,
+    normalMap: maps.jerseyNormal,
+    normalScale: new THREE.Vector2(0.4, 0.4),
+    roughnessMap: maps.jerseyRoughness,
+    roughness: 1.0,
+    metalness: 0.0,
+    ...extra,
+  });
   const materials = [
-    new THREE.MeshStandardMaterial({ color: 0xb08054, roughness: 0.72, metalness: 0.0 }), // skin
-    new THREE.MeshStandardMaterial({ color: 0xe8e9ee, roughness: 0.60, metalness: 0.02 }), // shirt
-    new THREE.MeshStandardMaterial({ color: 0x1b2f6b, roughness: 0.66, metalness: 0.02 }), // shorts
-    new THREE.MeshStandardMaterial({ color: 0xe8e9ee, roughness: 0.70, metalness: 0.0 }), // socks
+    new THREE.MeshStandardMaterial({ color: SKIN_COLOUR, roughness: 0.62, metalness: 0.0 }), // skin
+    cloth(kit.shirt), // shirt
+    cloth(kit.shorts), // shorts
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: kit.socks,
+      normalMap: maps.ribNormal,
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      roughnessMap: maps.ribRoughness,
+      roughness: 1.0,
+      metalness: 0.0,
+    }), // socks
     // Football boots, not patent loafers: a modern synthetic upper has a
     // broad, low sheen, and at 0.42 roughness these were throwing a hard
     // specular disc that read as polished dress leather.
-    new THREE.MeshStandardMaterial({ color: 0x191c25, roughness: 0.68, metalness: 0.0 }), // boots
-    new THREE.MeshStandardMaterial({ color: 0x2b1f18, roughness: 0.88, metalness: 0.0 }), // hair
+    new THREE.MeshStandardMaterial({ color: 0x15171d, roughness: 0.62, metalness: 0.0 }), // boots
+    new THREE.MeshStandardMaterial({ color: 0x241a14, roughness: 0.90, metalness: 0.0 }), // hair
     // The face map already carries the skin colour, so the tint stays white —
     // otherwise the head and the neck would never match.
-    new THREE.MeshStandardMaterial({ color: 0xffffff, map: makeFaceTexture(1024, hairlinePhi), roughness: 0.72, metalness: 0.0 }), // face
+    new THREE.MeshStandardMaterial({ color: 0xffffff, map: makeFaceTexture(1024, hairlinePhi), roughness: 0.62, metalness: 0.0 }), // face
   ];
 
   // One SkinnedMesh per kit material, all sharing a single skeleton. Cheaper
@@ -502,13 +498,18 @@ export function createPlayer() {
   // five draw calls is not a budget concern.
   const group = new THREE.Group();
   const byMaterial = materials.map(() => []);
-  for (const { geometry, materialIndex } of pieces) byMaterial[materialIndex].push(geometry);
+  for (const { geometry, materialIndex, keepNormals } of pieces) {
+    // Lathes get smooth normals from their own triangles. A field-meshed piece
+    // already carries the field's gradient, which is better than anything its
+    // triangles could vote for.
+    if (!keepNormals) geometry.computeVertexNormals();
+    byMaterial[materialIndex].push(geometry);
+  }
 
   const meshes = [];
   for (let i = 0; i < byMaterial.length; i += 1) {
     if (!byMaterial[i].length) continue;
-    const geometry = mergeGeometries(byMaterial[i], false);
-    geometry.computeVertexNormals();
+    const geometry = mergeGeometries(byMaterial[i].map(withSecondUV), false);
     const mesh = new THREE.SkinnedMesh(geometry, materials[i]);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -1306,6 +1307,138 @@ function earGeometry(centre, side, boneIdx) {
   geo.rotateZ(side * 0.10);
   geo.translate(centre.x + side * EAR_AT[0], centre.y + EAR_AT[1], centre.z + EAR_AT[2]);
   return rigidTo(geo, boneIdx, MATERIAL_INDEX.skin);
+}
+
+// --- field-meshed pieces ---------------------------------------------------
+
+/** The limb skinning rule, as a per-point function for the field mesher. */
+function limbWeights(p, a, axis, unit, boneA, boneB, handoff, root) {
+  const [h0, h1, h2] = handoff || [0.62, 1.0, null];
+  const raw = (p.x - a.x) * axis.x + (p.y - a.y) * axis.y + (p.z - a.z) * axis.z;
+  const t = h2 === null ? THREE.MathUtils.clamp(raw / unit, 0, 1) : Math.max(0, raw / unit);
+  let wChild = smootherstep(h0, h1, t) * 0.5;
+  if (h2 !== null) wChild += smootherstep(h1, h2, t) * 0.5;
+  const wRoot = root ? smootherstep(root.from, root.to, t) * root.max : 0;
+  const rest = 1 - wRoot;
+  const out = [[boneA, (1 - wChild) * rest], [boneB, wChild * rest]];
+  if (root) out.push([root.index, wRoot]);
+  return out;
+}
+
+/** The spine-chain skinning rule, likewise. */
+function chainWeights(p, chain, idx) {
+  const last = chain.length - 1;
+  let lo = 0;
+  while (lo < last - 1 && p.y > chain[lo + 1].y) lo += 1;
+  const t = THREE.MathUtils.clamp((p.y - chain[lo].y) / (chain[lo + 1].y - chain[lo].y), 0, 1);
+  const w = smootherstep(0, 1, t);
+  return [[idx[lo], 1 - w], [idx[lo + 1], w]];
+}
+
+/**
+ * Bind-pose extents of the two kit pieces, in metres: [xMin, xMax, yMin, yMax].
+ * The kit artwork in textures.js is painted against these same numbers.
+ */
+export const SHIRT_UV = [-0.36, 0.36, 0.86, 1.50];
+export const SHORTS_UV = [-0.26, 0.26, 0.64, 1.02];
+/** Metres of cloth per repeat of the knit micro-texture. */
+const KNIT_TILE = 0.11;
+
+/**
+ * Kit artwork is projected straight through the body, front and back: the left
+ * half of the texture is what you see from the front, the right half from
+ * behind. A shirt is printed flat and it reads that way. The sides, where a
+ * planar projection smears, are exactly where a kit has a plain side panel.
+ *
+ * `uv1` is a second, world-scaled set for the knit, so the weave stays the
+ * same size on a sleeve as on the chest.
+ */
+function projectKitUVs(geo, [x0, x1, y0, y1]) {
+  const pos = geo.getAttribute('position');
+  const nor = geo.getAttribute('normal');
+  const uv = geo.getAttribute('uv');
+  const uv1 = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const front = nor.getZ(i) >= 0;
+    const u = (x - x0) / (x1 - x0);
+    uv.setXY(i, front ? u * 0.5 : 1 - u * 0.5, (y - y0) / (y1 - y0));
+    const across = Math.abs(nor.getZ(i)) >= Math.abs(nor.getX(i)) ? x : pos.getZ(i);
+    uv1[i * 2] = across / KNIT_TILE;
+    uv1[i * 2 + 1] = y / KNIT_TILE;
+  }
+  geo.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2));
+}
+
+/**
+ * Points every vertex of a trim piece at one flat-colour swatch of the kit
+ * sheet, keeping its own lathe UVs as the knit set.
+ */
+function swatched(geo, swatch) {
+  if (!swatch) return geo;
+  const uv = geo.getAttribute('uv');
+  const uv1 = new Float32Array(uv.count * 2);
+  for (let i = 0; i < uv.count; i += 1) {
+    uv1[i * 2] = uv.getX(i) * 5;
+    uv1[i * 2 + 1] = uv.getY(i) * 0.5;
+    uv.setXY(i, swatch[0], swatch[1]);
+  }
+  geo.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2));
+  return geo;
+}
+
+/** Lathes have no second UV set of their own; mirror the first so merges match. */
+function withSecondUV(geo) {
+  if (!geo.getAttribute('uv1')) geo.setAttribute('uv1', geo.getAttribute('uv').clone());
+  return geo;
+}
+
+/**
+ * The hand: a palm, four fingers and a thumb, joined by the same smooth union
+ * as the shirt, so the webs between the fingers and the heel of the thumb are
+ * fillets rather than intersections. Rounds 1-3 used a creased mitten, which
+ * was the right triangle budget and the wrong silhouette — at three-quarter it
+ * read as an oven glove. Fingers are what say "hand".
+ *
+ * `down` runs wrist → fingertips, `fwd` is the thumb side, `palm` is the
+ * direction the palm faces (towards the thigh, for a hanging arm).
+ */
+const FINGERS = [
+  // [offset across the palm, length, radius, curl at the knuckle, curl mid-finger]
+  [0.0265, 0.070, 0.0086, 0.20, 0.42], // index
+  [0.0090, 0.078, 0.0090, 0.26, 0.50], // middle
+  [-0.0085, 0.072, 0.0086, 0.32, 0.58], // ring
+  [-0.0250, 0.056, 0.0076, 0.40, 0.66], // little
+];
+
+function handGeometry(wrist, down, fwd, palm) {
+  const at = (d, f, p) => wrist.clone().addScaledVector(down, d).addScaledVector(fwd, f).addScaledVector(palm, p);
+  const fields = [
+    // Wrist: carries the forearm's section into the hand so there is no step.
+    capsuleField(at(-0.030, 0, 0), at(0.016, 0, 0), 0.0215, 0.0225, { k: 0.012 }),
+    // Palm: a slab, slightly cupped by setting it off towards the palm side.
+    roundBoxField(at(0.054, 0.001, 0.002), palm, down, fwd, [0.0050, 0.036, 0.031], 0.0085, { k: 0.012 }),
+    // Heel of the thumb.
+    capsuleField(at(0.026, 0.020, 0.008), at(0.050, 0.030, 0.012), 0.0150, 0.0125, { k: 0.012 }),
+  ];
+  for (const [across, length, radius, curl1, curl2] of FINGERS) {
+    const knuckle = at(0.092, across, 0.002);
+    const dir1 = down.clone().multiplyScalar(Math.cos(curl1)).addScaledVector(palm, Math.sin(curl1));
+    const mid = knuckle.clone().addScaledVector(dir1, length * 0.52);
+    const a2 = curl1 + curl2;
+    const dir2 = down.clone().multiplyScalar(Math.cos(a2)).addScaledVector(palm, Math.sin(a2));
+    const tip = mid.clone().addScaledVector(dir2, length * 0.48);
+    fields.push(capsuleField(knuckle, mid, radius, radius * 0.93, { k: 0.0045 }));
+    fields.push(capsuleField(mid, tip, radius * 0.93, radius * 0.80, { k: 0.0045 }));
+  }
+  // Thumb: off the radial edge, angled forward and a little across the palm.
+  const t0 = at(0.050, 0.030, 0.012);
+  const t1 = at(0.082, 0.047, 0.020);
+  const t2 = at(0.106, 0.050, 0.030);
+  fields.push(capsuleField(t0, t1, 0.0115, 0.0100, { k: 0.006 }));
+  fields.push(capsuleField(t1, t2, 0.0100, 0.0082, { k: 0.006 }));
+  return meshFields(fields, { cell: 0.0052, skinned: false });
 }
 
 // --- clip authoring ------------------------------------------------------
