@@ -1,0 +1,22 @@
+{
+  "name": "kick-up-trailer",
+  "private": true,
+  "type": "module",
+  "description": "Trailer pipeline for Project Kick-Up: real gameplay capture, HyperFrames title cards, Remotion master edit.",
+  "dependencies": {
+    "@remotion/bundler": "4.0.543",
+    "@remotion/cli": "4.0.543",
+    "@remotion/renderer": "4.0.543",
+    "hyperframes": "0.9.34",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.543"
+  },
+  "scripts": {
+    "capture": "node capture.mjs",
+    "endcard": "cd hyperframes && HYPERFRAMES_NO_TELEMETRY=1 hyperframes render --quality looks -o ../public/endcard.mp4",
+    "edit": "remotion render remotion/index.jsx Trailer out/trailer.mp4 --codec h264 --crf 18",
+    "studio": "remotion studio remotion/index.jsx",
+    "trailer": "npm run capture && npm run endcard && npm run edit"
+  }
+}

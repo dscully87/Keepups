@@ -1,0 +1,153 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      background: #0a1230;
+      font-family: "Archivo Black", sans-serif;
+      color: #eef0f4;
+    }
+    /* Mown-pitch stripes, very low contrast, so the ground is not a void. */
+    #ec-pitch {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(180deg, #0a1230 0 160px, #0d173b 160px 320px);
+    }
+    #ec-glow {
+      position: absolute;
+      left: 140px;
+      top: 420px;
+      width: 800px;
+      height: 800px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 90, 79, 0.34) 0%, rgba(255, 90, 79, 0) 68%);
+    }
+    #ec-ball {
+      position: absolute;
+      left: 400px;
+      top: 560px;
+      width: 280px;
+      height: 280px;
+    }
+    #ec-shadow {
+      position: absolute;
+      left: 410px;
+      top: 828px;
+      width: 260px;
+      height: 30px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.55);
+    }
+    #ec-title {
+      position: absolute;
+      left: 0;
+      top: 930px;
+      width: 1080px;
+      text-align: center;
+      font-size: 168px;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+    #ec-title span {
+      display: inline-block;
+    }
+    #ec-title .ec-dash {
+      color: #ff5a4f;
+    }
+    #ec-rule {
+      position: absolute;
+      left: 390px;
+      top: 1128px;
+      width: 300px;
+      height: 8px;
+      background: #ff5a4f;
+    }
+    #ec-tag {
+      position: absolute;
+      left: 0;
+      top: 1176px;
+      width: 1080px;
+      text-align: center;
+      font-family: "Inter", sans-serif;
+      font-weight: 700;
+      font-size: 54px;
+      letter-spacing: 0.01em;
+      color: #c9d2ee;
+    }
+    #ec-tag span {
+      display: inline-block;
+      margin: 0 9px;
+    }
+  </style>
+  <div id="root" data-composition-id="endcard" data-width="1080" data-height="1920">
+    <div id="ec-pitch"></div>
+    <div id="ec-glow" class="clip" data-start="0" data-duration="3.6" data-layout-ignore></div>
+    <div id="ec-shadow" class="clip" data-start="0" data-duration="3.6" data-layout-ignore></div>
+    <div id="ec-ball" class="clip" data-start="0" data-duration="3.6">
+      <svg id="ec-ball-art" viewBox="-100 -100 200 200" width="280" height="280">
+        <defs>
+          <radialGradient id="ec-shade" cx="0.36" cy="0.30" r="0.85">
+            <stop offset="0" stop-color="#ffffff" />
+            <stop offset="0.62" stop-color="#e3e6ee" />
+            <stop offset="1" stop-color="#8f97b0" />
+          </radialGradient>
+          <clipPath id="ec-clip"><circle r="96" /></clipPath>
+        </defs>
+        <circle r="96" fill="url(#ec-shade)" />
+        <g clip-path="url(#ec-clip)" fill="#17275c" stroke="#17275c" stroke-width="5" stroke-linejoin="round">
+          <polygon points="0,-34 32,-10 20,28 -20,28 -32,-10" />
+          <polygon points="0,-104 34,-80 22,-58 -22,-58 -34,-80" />
+          <polygon points="99,-32 100,10 74,22 52,-4 62,-40" />
+          <polygon points="61,84 26,104 8,80 24,54 56,56" />
+          <polygon points="-61,84 -26,104 -8,80 -24,54 -56,56" />
+          <polygon points="-99,-32 -100,10 -74,22 -52,-4 -62,-40" />
+          <g fill="none" stroke-width="4">
+            <path d="M0,-34 L0,-58 M32,-10 L52,-4 M20,28 L24,54 M-20,28 L-24,54 M-32,-10 L-52,-4" />
+          </g>
+        </g>
+      </svg>
+    </div>
+    <h1 id="ec-title" class="clip" data-start="0.5" data-duration="3.1">
+      <span class="ec-l">K</span><span class="ec-l">I</span><span class="ec-l">C</span><span class="ec-l">K</span><span class="ec-l ec-dash">-</span><span class="ec-l">U</span><span class="ec-l">P</span>
+    </h1>
+    <div id="ec-rule" class="clip" data-start="0.9" data-duration="2.7"><div id="ec-rule-fill" style="width:100%;height:100%;background:#ff5a4f"></div></div>
+    <p id="ec-tag" class="clip" data-start="1.1" data-duration="2.5">
+      <span class="ec-w">Tap.</span><span class="ec-w">Time it.</span><span class="ec-w">Keep it up.</span>
+    </p>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // The ball drops in and takes three decaying bounces: gravity in, gravity
+    // out, each apex 42% of the last. One tween per flight, eased as a parabola.
+    const floor = 0;
+    const drops = [{ from: -1100, dur: 0.42 }];
+    tl.fromTo("#ec-ball-art", { y: -1100 }, { y: floor, duration: 0.42, ease: "power2.in" }, 0);
+    let t = 0.42;
+    let height = 300;
+    for (let i = 0; i < 3; i += 1) {
+      const half = 0.16 * Math.sqrt(height / 300) + 0.06;
+      tl.to("#ec-ball-art", { y: -height, duration: half, ease: "power2.out" }, t);
+      tl.to("#ec-ball-art", { y: floor, duration: half, ease: "power2.in" }, t + half);
+      t += half * 2;
+      height *= 0.42;
+    }
+    tl.fromTo("#ec-ball-art", { rotation: -200 }, { rotation: 24, duration: t, ease: "power1.out", transformOrigin: "50% 50%" }, 0);
+    // Squash on the first, hardest landing only.
+    tl.fromTo("#ec-ball-art", { scaleY: 1, scaleX: 1 }, { scaleY: 0.84, scaleX: 1.1, duration: 0.05, ease: "power2.out", transformOrigin: "50% 100%" }, 0.40);
+    tl.to("#ec-ball-art", { scaleY: 1, scaleX: 1, duration: 0.12, ease: "power2.out" }, 0.45);
+
+    tl.fromTo("#ec-shadow", { opacity: 0, scaleX: 0.3 }, { opacity: 1, scaleX: 1, duration: 0.42, ease: "power2.in" }, 0);
+    tl.fromTo("#ec-glow", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.5, ease: "expo.out" }, 0.40);
+
+    // Title: letters knocked up into place by the first landing.
+    tl.fromTo(".ec-l", { opacity: 0, y: 90, filter: "blur(10px)" },
+      { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.42, ease: "back.out(1.6)", stagger: 0.035 }, 0.5);
+    tl.fromTo("#ec-rule-fill", { scaleX: 0 }, { scaleX: 1, duration: 0.45, ease: "expo.out", transformOrigin: "50% 50%" }, 0.9);
+    tl.fromTo(".ec-w", { opacity: 0, filter: "blur(6px)" },
+      { opacity: 1, filter: "blur(0px)", duration: 0.16, ease: "power2.out", stagger: 0.28 }, 1.1);
+
+    window.__timelines["endcard"] = tl;
+  </script>
+</template>

@@ -171,6 +171,227 @@ export function makeBallTextures(size = 1024) {
   return { map, normalMap, roughnessMap };
 }
 
+// --- kit ---------------------------------------------------------------
+
+export const KIT = {
+  white: '#e4e6ec',
+  navy: '#17275c',
+  coral: '#ff5a4f',
+  number: '10',
+};
+
+/**
+ * Baked surface maps authored in MaterialCraft (tools/materials/build.mjs).
+ * They load asynchronously; until they arrive the materials simply render
+ * without micro-relief, so nothing waits on them.
+ */
+let materialMaps = null;
+export function loadMaterialMaps() {
+  if (materialMaps) return materialMaps;
+  const base = new URL('../../../assets/materials/', import.meta.url);
+  const loader = new THREE.TextureLoader();
+  const load = (file, { channel = 0, repeat = [1, 1] } = {}) => {
+    const tex = loader.load(new URL(file, base).href);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeat[0], repeat[1]);
+    tex.channel = channel;
+    tex.anisotropy = 8;
+    return tex;
+  };
+  materialMaps = {
+    // The knit rides on the second, world-scaled UV set.
+    jerseyNormal: load('jersey-normal.png', { channel: 1 }),
+    jerseyRoughness: load('jersey-roughness.png', { channel: 1 }),
+    ribNormal: load('rib-normal.png', { repeat: [3, 2.5] }),
+    ribRoughness: load('rib-roughness.png', { repeat: [3, 2.5] }),
+    turfNormal: load('turf-normal.png'),
+    turfRoughness: load('turf-roughness.png'),
+  };
+  return materialMaps;
+}
+
+/**
+ * Kit artwork. The shirt and shorts are painted in *metres on the body* — the
+ * `front`/`back` helpers below convert a bind-pose position to pixels — so a
+ * stripe drawn at chest height lands at chest height, with no UV unwrapping to
+ * reason about. Left half of each canvas is the front, right half the back
+ * (see projectKitUVs in player.js).
+ */
+export function makeKitTextures(shirtBox = [-0.36, 0.36, 0.86, 1.50], shortsBox = [-0.26, 0.26, 0.64, 1.02]) {
+  const finish = (canvas) => {
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    return tex;
+  };
+
+  const sheet = (size, [x0, x1, y0, y1], paint) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const half = size / 2;
+    const sx = half / (x1 - x0);
+    const sy = size / (y1 - y0);
+    for (const back of [false, true]) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(back ? half : 0, 0, half, size);
+      ctx.clip();
+      // Metres in, pixels out. The back half runs the other way in x so that
+      // it reads correctly to someone standing behind the player.
+      const X = (x) => (back ? size - (x - x0) * sx : (x - x0) * sx);
+      const Y = (y) => size - (y - y0) * sy;
+      paint(ctx, { X, Y, sx, sy, back, half, size });
+      ctx.restore();
+    }
+    return c;
+  };
+
+  const numeral = (ctx, text, cx, cy, heightPx, fill, stroke) => {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(0.86, 1);
+    ctx.font = `900 ${heightPx * 1.32}px "Arial Black", "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (stroke) {
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = heightPx * 0.09;
+      ctx.strokeStyle = stroke;
+      ctx.strokeText(text, 0, 0);
+    }
+    ctx.fillStyle = fill;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  };
+
+  // --- shirt -------------------------------------------------------------
+  const shirt = sheet(1024, shirtBox, (ctx, { X, Y, sx, sy, back, half, size }) => {
+    const left = back ? half : 0;
+    ctx.fillStyle = KIT.white;
+    ctx.fillRect(left, 0, half, size);
+
+    // Tonal pinstripes: barely there, but they stop the white being a void.
+    ctx.fillStyle = 'rgba(23,39,92,0.045)';
+    for (let x = -0.34; x <= 0.34; x += 0.022) ctx.fillRect(X(x) - 1, 0, 2, size);
+
+    // Side panels under the arm, curving in towards the waist.
+    for (const side of [-1, 1]) {
+      ctx.fillStyle = KIT.navy;
+      ctx.beginPath();
+      ctx.moveTo(X(side * 0.40), Y(1.245));
+      ctx.lineTo(X(side * 0.150), Y(1.245));
+      ctx.quadraticCurveTo(X(side * 0.112), Y(1.06), X(side * 0.128), Y(0.86));
+      ctx.lineTo(X(side * 0.40), Y(0.86));
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = KIT.coral;
+      ctx.lineWidth = 0.006 * sx;
+      ctx.beginPath();
+      ctx.moveTo(X(side * 0.143), Y(1.245));
+      ctx.quadraticCurveTo(X(side * 0.105), Y(1.06), X(side * 0.121), Y(0.86));
+      ctx.stroke();
+
+      // Sleeve cuff, square to the arm rather than to the page.
+      ctx.save();
+      ctx.translate(X(side * 0.2165), Y(1.243));
+      ctx.rotate((back ? -1 : 1) * side * -0.136);
+      ctx.fillStyle = KIT.navy;
+      ctx.fillRect(-0.10 * sx, -0.030 * sy, 0.20 * sx, 0.050 * sy);
+      ctx.fillStyle = KIT.coral;
+      ctx.fillRect(-0.10 * sx, -0.037 * sy, 0.20 * sx, 0.007 * sy);
+      ctx.restore();
+    }
+
+    // Shoulder flash running out from the collar along the top of the yoke.
+    ctx.fillStyle = KIT.navy;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(X(side * 0.070), Y(1.50));
+      ctx.lineTo(X(side * 0.070), Y(1.438));
+      ctx.lineTo(X(side * 0.30), Y(1.395));
+      ctx.lineTo(X(side * 0.30), Y(1.50));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    if (back) {
+      ctx.fillStyle = KIT.navy;
+      ctx.save();
+      ctx.translate(X(0), Y(1.352));
+      ctx.font = `800 ${0.040 * sy}px "Helvetica Neue", Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // Letter-spaced by hand; canvas letterSpacing is not universal.
+      const name = 'KEEPUPS';
+      const step = 0.031 * sx;
+      for (let i = 0; i < name.length; i += 1) ctx.fillText(name[i], (i - (name.length - 1) / 2) * step, 0);
+      ctx.restore();
+      numeral(ctx, KIT.number, X(0), Y(1.195), 0.205 * sy, KIT.navy, null);
+    } else {
+      // Crest over the heart: a shield with a ball-panel pentagon.
+      const cx = X(0.078);
+      const cy = Y(1.318);
+      const r = 0.026 * sx;
+      ctx.fillStyle = KIT.navy;
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy - r * 1.1);
+      ctx.lineTo(cx + r, cy - r * 1.1);
+      ctx.lineTo(cx + r, cy + r * 0.25);
+      ctx.quadraticCurveTo(cx + r, cy + r * 1.05, cx, cy + r * 1.45);
+      ctx.quadraticCurveTo(cx - r, cy + r * 1.05, cx - r, cy + r * 0.25);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = KIT.coral;
+      ctx.beginPath();
+      for (let i = 0; i < 5; i += 1) {
+        const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+        ctx.lineTo(cx + Math.cos(a) * r * 0.52, cy + r * 0.08 + Math.sin(a) * r * 0.52);
+      }
+      ctx.closePath();
+      ctx.fill();
+      numeral(ctx, KIT.number, X(-0.078), Y(1.318), 0.038 * sy, KIT.navy, null);
+    }
+
+    // Swatch strip below the hem: the collar samples its colour from here.
+    ctx.fillStyle = KIT.navy;
+    ctx.fillRect(left, size - 20, half, 20);
+  });
+
+  // --- shorts ------------------------------------------------------------
+  const shorts = sheet(512, shortsBox, (ctx, { X, Y, sx, sy, back, half, size }) => {
+    ctx.fillStyle = KIT.navy;
+    ctx.fillRect(back ? half : 0, 0, half, size);
+    for (const side of [-1, 1]) {
+      // Piping only. Anything wider smears across the whole hip, because the
+      // side of the leg is edge-on to this projection.
+      ctx.fillStyle = KIT.white;
+      ctx.fillRect(Math.min(X(side * 0.150), X(side * 0.160)), 0, Math.abs(X(0.160) - X(0.150)), size);
+      ctx.fillStyle = KIT.coral;
+      ctx.fillRect(Math.min(X(side * 0.164), X(side * 0.169)), 0, Math.abs(X(0.169) - X(0.164)), size);
+    }
+    if (!back) numeral(ctx, KIT.number, X(-0.100), Y(0.728), 0.034 * sy, KIT.white, null);
+  });
+
+  // --- socks: v runs from the turnover (0) down to the ankle (1) ------------
+  const socks = document.createElement('canvas');
+  socks.width = 16;
+  socks.height = 256;
+  {
+    const ctx = socks.getContext('2d');
+    const band = (v0, v1, colour) => {
+      ctx.fillStyle = colour;
+      ctx.fillRect(0, 256 * (1 - v1), 16, 256 * (v1 - v0));
+    };
+    band(0, 1, KIT.white);
+    band(0.0, 0.085, KIT.navy);
+    band(0.115, 0.145, KIT.coral);
+    band(0.175, 0.205, KIT.navy);
+  }
+
+  return { shirt: finish(shirt), shorts: finish(shorts), socks: finish(socks) };
+}
+
 /** Mown turf with mower stripes, blade noise and a touchline. */
 export function makeTurfTexture(size = 1024, stripes = 10) {
   const c = document.createElement('canvas');
