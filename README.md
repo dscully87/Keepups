@@ -1,7 +1,10 @@
 # Project Kick-Up
 
-A mobile-web soccer keep-up game. Tap to strike the ball; time each touch to
-the sweet spot to build a combo; the ball falls faster as your streak grows.
+A mobile-web soccer keep-up game. **Swipe to kick**: the direction of your
+flick steers the ball and its speed sets how high it goes. Time each touch to
+the sweet spot to build a combo, and keep the ball over the pitch — it drifts
+in the wind, nothing pulls it back to the middle, and the character can only
+kick it if it is within reach.
 
 Vanilla JavaScript and Three.js, no build step. Open `index.html` from any
 static server and it runs.
@@ -9,13 +12,38 @@ static server and it runs.
 ```bash
 npm install      # playwright, for the quality gates
 npm start        # serve at http://127.0.0.1:8080
-npm run gate     # run all six quality gates
+npm run gate     # run all seven quality gates
 ```
 
 The trailer is built from the game itself — see [Trailer](#trailer).
 
 `?q=high|medium|low` on the URL pins a rendering tier and disables the
 adaptive governor — useful for testing a specific device profile.
+
+## How it plays
+
+| Thing | Rule |
+|---|---|
+| Kick | Fires on release. Direction and speed come from the last ~80 ms of the swipe, normalised by screen height. A plain tap (or Space) kicks straight up at medium power; arrow keys held add direction. |
+| Sideways | `side` (-1..1) × `KICK_SIDE_MAX` 2.4 m/s. No randomness anywhere in the core: the only random source is a seeded generator on the game object. |
+| Height | `power` (0..1) maps to 4.2–7.2 m/s launch speed. High balls give time to reposition but travel further sideways and fall faster. |
+| Character | Shuffles at 2.6 m/s towards the predicted landing point and can kick only within 0.55 m. A hard kick out-runs them. |
+| Out | A ball that leaves the pitch sides (±1.35 m) ends the rally; there are no walls. |
+| Wind | Peak sideways acceleration per tier: 0 / 0.7 / 1.3 / 2.0 m/s², slowly alternating (seeded). |
+| Bonuses | CONTROL (ball will land near you), RESCUE (contact near the edge of reach), HEIGHT (clean control after a high kick), each shown by name. |
+
+Guides: a dashed aim arc while the finger is down (fades out by the top tier),
+a ring where the ball will land, and a ring under the character that turns
+green when the ball is kickable. A rescue earns a beat of slow motion.
+
+**Tuning status.** The numbers above are the plan's starting values with the
+wind raised from 0.3/0.6/0.9 to 0.7/1.3/2.0: at the original values a player
+tapping straight survived 146 kicks because the character catches any drift
+under 0.55 m. With the final values, in the headless bots (`tools/gate7.mjs`)
+a steering player lasts ~110 kicks, a straight-tapper ~35 and a random swiper
+~2. **Nobody has playtested this on a real handset yet**, so feel — whether a
+first-timer reaches ~5, whether losing feels fair — is untested and the
+constants in `src/core/constants.js` / `difficulty.js` are expected to move.
 
 ## How it is put together
 
@@ -152,7 +180,8 @@ are not unit tests against mocks.
 | 3 | Three.js migration, skinning, animation blending, IK | 24/24 |
 | 4 | Stadium, lighting, post-processing, image dynamic range | 26/26 |
 | 5 | HUD layout, audio, haptics, impact sync | 23/23 |
-| 6 | Input latency, frame pacing, allocation churn, effects | 29/29 |
+| 6 | Input latency (pointerdown anticipation, pointerup kick), frame pacing, allocation churn, effects | 31/31 |
+| 7 | Swipe-to-aim rules: direction, power, reach, no self-rescue, seeded determinism, skill gap | 19/19 |
 
 The gates found most of the real bugs in this project, including several that
 looked fine on screen: a colour-space error that was crushing 31% of every

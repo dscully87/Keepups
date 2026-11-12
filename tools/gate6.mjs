@@ -36,23 +36,34 @@ const ownLatency = await page.evaluate(async () => {
   const canvas = document.getElementById('stage');
 
   const before = latency.stats().count;
+  // The swipe kick fires on pointerup (direction does not exist before that); the
+  // pointerdown only starts the anticipation. Measure both separately.
+  let anticipated = 0;
+  let kicked = 0;
+  const ev = (type, x, y) => new PointerEvent(type, {
+    bubbles: true, cancelable: true, pointerType: 'touch', pointerId: 7, button: 0, clientX: x, clientY: y,
+  });
   for (let i = 0; i < 40; i += 1) {
     game.ball.y = 0.5;
     game.ball.vy = -3;
+    game.ball.x = 0;
+    game.playerX = 0;
     game.lastKickAt = -Infinity;
     game.lockoutUntil = -Infinity;
-    canvas.dispatchEvent(
-      new PointerEvent('pointerdown', {
-        bubbles: true, cancelable: true, pointerType: 'touch', button: 0,
-        clientX: 195, clientY: 560,
-      }),
-    );
+    const score = game.score;
+    canvas.dispatchEvent(ev('pointerdown', 195, 560));
+    if (window.__KICKUP__.stage._aim) anticipated += 1; // aim preview armed inside the handler
+    canvas.dispatchEvent(ev('pointermove', 215, 520));
+    canvas.dispatchEvent(ev('pointerup', 235, 480));
+    if (game.score > score) kicked += 1;
     await new Promise((r) => setTimeout(r, 0));
   }
   const stats = latency.stats();
-  return { recorded: stats.count - before, ...stats };
+  return { recorded: stats.count - before, anticipated, kicked, ...stats };
 });
-check('taps are recorded by the latency probe', ownLatency.recorded >= 30, `${ownLatency.recorded} of 40 dispatched events recorded`);
+check('pointerdown starts the anticipation inside the handler', ownLatency.anticipated === 40, `${ownLatency.anticipated} of 40`);
+check('pointerup kicks the ball inside the handler', ownLatency.kicked === 40, `${ownLatency.kicked} of 40 swipes connected`);
+check('releases are recorded by the latency probe', ownLatency.recorded >= 30, `${ownLatency.recorded} of 40 dispatched events recorded`);
 check('the game adds no perceptible input lag',
   ownLatency.median < 3,
   `median ${ownLatency.median}ms, p95 ${ownLatency.p95}ms from the browser's own event timestamp`);

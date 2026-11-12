@@ -1,5 +1,5 @@
 import { Game, STATE } from './core/game.js';
-import { createTapInput } from './core/input.js';
+import { createSwipeInput } from './core/input.js';
 import { AudioEngine, haptics } from './core/audio.js';
 import { multiplierFor } from './core/combo.js';
 import { Stage } from './render/three/stage.js';
@@ -15,6 +15,7 @@ const ui = {
   best: document.getElementById('best'),
   points: document.getElementById('points'),
   hint: document.getElementById('hint'),
+  hintText: document.getElementById('hint-text'),
   flash: document.getElementById('flash'),
   overlay: document.getElementById('overlay'),
   finalScore: document.getElementById('final-score'),
@@ -22,6 +23,7 @@ const ui = {
   finalCombo: document.getElementById('final-combo'),
   finalBest: document.getElementById('final-best'),
   record: document.getElementById('record'),
+  finalReason: document.getElementById('final-reason'),
   sound: document.getElementById('sound'),
 };
 
@@ -67,7 +69,8 @@ function handleEvent({ type, data }) {
     case 'kick': {
       stage.onKick(data);
 
-      const power = data.grade === 'PERFECT' ? 1 : data.grade === 'GOOD' ? 0.7 : 0.45;
+      // Pitch and weight follow how hard it was swiped, tempered by how clean the timing was.
+      const power = (data.grade === 'PERFECT' ? 1 : data.grade === 'GOOD' ? 0.7 : 0.45) * 0.5 + (data.power ?? 0.5) * 0.5;
       audio.strike(power);
       if (data.grade === 'PERFECT') audio.perfectChime(data.combo);
       haptics.strike(data.grade);
@@ -79,6 +82,13 @@ function handleEvent({ type, data }) {
       } else {
         flash('SCRAPPY', 'sloppy');
       }
+      // Name the reason for any bonus so points never feel arbitrary.
+      if (data.bonuses?.length) {
+        const top = data.bonuses.reduce((a, b) => (b.points > a.points ? b : a));
+        flash(`${top.name} +${top.points}`, 'perfect');
+      }
+      if (data.bonuses?.some((b) => b.name === 'RESCUE')) slowMo = 0.22;
+      if (data.swipe !== false && Math.abs(data.side) > 0.05) learnedSwipe();
       punchScore();
       // The crowd warms up as a rally builds.
       audio.setCrowdLevel(Math.min(1, data.score / 45 + data.combo / 25));
@@ -88,7 +98,7 @@ function handleEvent({ type, data }) {
     case 'whiff':
       audio.whiff();
       haptics.fire(5);
-      flash('MISTIMED', 'sloppy');
+      flash(data.outOfReach ? 'TOO FAR' : 'MISTIMED', 'sloppy');
       break;
 
     case 'milestone':
@@ -105,6 +115,7 @@ function handleEvent({ type, data }) {
       ui.finalPoints.textContent = data.points.toLocaleString();
       ui.finalCombo.textContent = String(data.bestCombo);
       ui.finalBest.textContent = String(data.highScore);
+      ui.finalReason.textContent = data.reason === 'out' ? 'Ball went out' : '';
       ui.record.classList.toggle('on', data.newRecord);
       ui.overlay.classList.add('visible');
       break;
@@ -126,15 +137,40 @@ function drainEvents() {
 
 // --- input ---------------------------------------------------------------
 
-createTapInput(canvas, (tap) => {
-  // Must happen inside the gesture handler or the browser blocks audio.
-  audio.unlock();
-  game.tap();
-  // Drain here, not next frame: this is the impact instant.
-  drainEvents();
-  // Measured from the browser's own event timestamp, so this is the latency
-  // this code adds on top of the hardware's.
-  latency.record(tap.at, tap.handledAt);
+// How many swipes the player has made, remembered so the hint stops nagging once learned.
+const SWIPES_KEY = 'kickup.swipes.v1';
+let swipesLearned = 0;
+try { swipesLearned = Number(localStorage.getItem(SWIPES_KEY)) || 0; } catch { /* private mode */ }
+function learnedSwipe() {
+  swipesLearned += 1;
+  try { localStorage.setItem(SWIPES_KEY, String(swipesLearned)); } catch { /* ignore */ }
+}
+
+// Aim preview fades as the tiers climb so experts are not handed the answer.
+const aimAlpha = () => Math.max(0, 1 - game.tierIndex * 0.34);
+let slowMo = 0; // seconds of slow motion left after a rescue
+
+// The kick itself fires on release (direction does not exist before that), so
+// pointerdown starts the anticipation: instant feedback with no ball contact yet.
+createSwipeInput(canvas, {
+  onStart() {
+    audio.unlock();
+    stage.setAim({ side: 0, power: 0.5 }, aimAlpha());
+  },
+  onMove(aim) {
+    stage.setAim(aim, aimAlpha());
+  },
+  onCancel() {
+    stage.setAim(null);
+  },
+  onRelease(input) {
+    stage.setAim(null);
+    audio.unlock();
+    game.kick({ side: input.side, power: input.power });
+    // Drain here, not next frame: this is the impact instant.
+    drainEvents();
+    latency.record(input.at, input.handledAt);
+  },
 });
 
 ui.sound.addEventListener('click', (e) => {
@@ -175,6 +211,9 @@ function syncHud() {
   }
 
   ui.hint.style.opacity = game.state === STATE.READY ? '1' : '0';
+  // Once a few swipes have landed the hint drops the animation and just says how to start.
+  ui.hintText.textContent = swipesLearned >= 3 ? 'Tap to start' : 'Swipe to kick';
+  ui.hint.classList.toggle('learned', swipesLearned >= 3);
 }
 
 // --- loop ----------------------------------------------------------------
@@ -191,9 +230,15 @@ function frame(now) {
   }
 
   governor.sample(dt);
-  game.advance(dt);
+  // A rescue earns a beat of slow motion so the save registers.
+  let simDt = dt;
+  if (slowMo > 0) {
+    slowMo -= dt;
+    simDt = dt * 0.4;
+  }
+  game.advance(simDt);
   drainEvents();
-  stage.update(game, dt);
+  stage.update(game, simDt);
   stage.render(dt);
   syncHud();
 

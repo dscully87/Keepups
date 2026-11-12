@@ -118,6 +118,20 @@
   /* The pulse lives on the inner span: a keyframe animating opacity on #hint
      itself would outrank the inline opacity JS uses to hide it during play. */
   #hint span { display: inline-block; animation: breathe 2.4s ease-in-out infinite; }
+  /* A finger that flicks up and to the side, teaching the control without words. */
+  .swipe-icon {
+    display: inline-block; width: 2.2vmin; height: 2.2vmin; margin-right: 2.4vmin;
+    border-radius: 50%; background: rgba(255,255,255,.85); vertical-align: middle;
+    animation: flick 1.6s ease-in-out infinite;
+  }
+  @keyframes flick {
+    0% { transform: translate(-3vmin, 3vmin); opacity: 0 }
+    20% { opacity: 1 }
+    70% { transform: translate(3vmin, -4vmin); opacity: 1 }
+    100% { transform: translate(4vmin, -5vmin); opacity: 0 }
+  }
+  #hint.learned .swipe-icon { display: none; }
+  #hint b { font-weight: inherit; }
   @keyframes breathe { 0%,100% { opacity: .45 } 50% { opacity: .95 } }
 
   /* --- sound toggle --------------------------------------------------- */
@@ -182,7 +196,7 @@
   </div>
 
   <div class="hud" id="flash"></div>
-  <div class="hud" id="hint"><span>Tap anywhere to kick</span></div>
+  <div class="hud" id="hint"><span><i class="swipe-icon" aria-hidden="true"></i><b id="hint-text">Swipe to kick</b></span></div>
 
   <button id="sound" aria-label="Toggle sound">&#9835;</button>
 
@@ -190,6 +204,7 @@
     <h1>FULL TIME</h1>
     <div id="final-score">0</div>
     <div id="record">New personal best</div>
+    <div id="final-reason" style="opacity:.7;letter-spacing:.12em;min-height:1.2em"></div>
     <div id="final-stats">
       <div><span>Points</span><b id="final-points">0</b></div>
       <div><span>Best combo</span><b id="final-combo">0</b></div>
