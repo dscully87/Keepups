@@ -50,9 +50,11 @@ export class BallBody {
 
   /**
    * @param {number} dt fixed step in seconds
-   * @param {{gravity:number, drag:number, restitution:number}} tuning
+   * @param {{gravity:number, drag:number, restitution:number, openSides?:boolean}} tuning
+   * @param {number} windAx sideways acceleration (m/s²) from wind
    */
-  step(dt, tuning) {
+  step(dt, tuning, windAx = 0) {
+    this.vx += windAx * dt;
     this.vy -= tuning.gravity * dt;
 
     // Linear drag approximation: v *= (1 - k*dt), clamped so large dt is safe.
@@ -65,7 +67,7 @@ export class BallBody {
     this.y += this.vy * dt;
     this.z += this.vz * dt;
 
-    this.#clampWalls(tuning.restitution);
+    this.#clampWalls(tuning.restitution, tuning.openSides);
 
     this.spinRate *= Math.max(0, 1 - 0.7 * dt);
     this.rotation += this.spinRate * dt;
@@ -73,9 +75,13 @@ export class BallBody {
     this.grounded = this.y <= BALL_RADIUS + 1e-4;
   }
 
-  #clampWalls(restitution) {
+  #clampWalls(restitution, openSides = false) {
     const limitX = PLAY_HALF_WIDTH - BALL_RADIUS;
-    if (this.x > limitX) {
+    // While a rally is live the sides are open: a ball that leaves is lost (game.js
+    // ends the rally). Walls only exist for the idle attract-mode bounce.
+    if (openSides) {
+      /* no side clamp */
+    } else if (this.x > limitX) {
       this.x = limitX;
       this.vx = -Math.abs(this.vx) * restitution;
     } else if (this.x < -limitX) {
@@ -100,14 +106,24 @@ export class BallBody {
   }
 
   /**
-   * Apply a strike. `power` is the launch speed in m/s, `recentre` pulls the
-   * ball back towards the player so a clean juggle stays in front of them.
+   * Launch the ball with an explicit velocity. The spin axis follows the
+   * direction of travel so the ball visibly rolls the way it is going.
    */
-  strike(power, recentre, lateral = 0, depth = 0) {
-    this.vy = power;
-    this.vx = -this.x * recentre + lateral;
-    this.vz = -this.z * recentre + depth;
-    this.spinRate = 6 + power * 1.6;
-    this.spinAxis = { x: 1, y: 0.15, z: 0.05 };
+  strike(vx, vy, vz = 0) {
+    this.vx = vx;
+    this.vy = vy;
+    this.vz = vz;
+    this.spinRate = 6 + vy * 1.6;
+    // Axis is perpendicular to the horizontal travel direction (rolling forwards).
+    const h = Math.hypot(vx, vz);
+    if (h > 1e-3) {
+      this.spinAxis.x = vz / h;
+      this.spinAxis.y = 0.15;
+      this.spinAxis.z = -vx / h;
+    } else {
+      this.spinAxis.x = 1;
+      this.spinAxis.y = 0.15;
+      this.spinAxis.z = 0.05;
+    }
   }
 }

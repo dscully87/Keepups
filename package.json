@@ -10,9 +10,10 @@
     "gate:1": "node tools/gate1.mjs",
     "gate:2": "node tools/gate2.mjs",
     "gate:3": "node tools/gate3.mjs",
-    "gate": "node tools/gate1.mjs && node tools/gate2.mjs && node tools/gate3.mjs && node tools/gate4.mjs && node tools/gate5.mjs && node tools/gate6.mjs",
+    "gate": "node tools/gate1.mjs && node tools/gate2.mjs && node tools/gate3.mjs && node tools/gate4.mjs && node tools/gate5.mjs && node tools/gate6.mjs && node tools/gate7.mjs",
     "gate:4": "node tools/gate4.mjs",
     "gate:5": "node tools/gate5.mjs",
+    "gate:7": "node tools/gate7.mjs",
     "gate:6": "node tools/gate6.mjs"
   },
   "devDependencies": {

@@ -5,10 +5,14 @@ import { buildStadium } from './stadium.js';
 import { PostChain, detectQuality } from './post.js';
 import { ImpactFX, CameraShake } from './effects.js';
 import { makeTurfTexture, loadMaterialMaps } from './textures.js';
-import { SWEET_SPOT_Y } from '../../core/constants.js';
+import { SWEET_SPOT_Y, PLAYER_REACH } from '../../core/constants.js';
 
 /** The ball plays in front of the player so the boot can reach it. */
 export const BALL_FORWARD = 0.24;
+
+/** Group x of the character when playerX is 0 (the ball keeps the centre of frame). */
+const PLAYER_BASE_X = -0.30;
+const AIM_POINTS = 14;
 
 /** Ball heights over which the boot ramps from "idle" to "shadowing the ball". */
 const TRACK_START = 1.45;
@@ -56,7 +60,12 @@ export class Stage {
 
     this.player = createPlayer();
     // Stand the player back and to the side; the ball keeps the centre frame.
-    this.player.group.position.set(-0.30, 0, -0.10);
+    this.player.group.position.set(PLAYER_BASE_X, 0, -0.10);
+    this._lean = 0;
+    this._follow = 0;
+    this._prevPlayerX = 0;
+    this._aimBuf = new Float32Array(AIM_POINTS * 3);
+    this.#buildGuides();
     this.player.group.rotation.y = 0.34;
     this.scene.add(this.player.group);
 
@@ -214,6 +223,85 @@ export class Stage {
     this.height = h;
   }
 
+  /**
+   * Aim preview, landing marker and reach ring. Pure presentation: they read the game and
+   * never feed anything back. Pre-allocated so nothing is created per frame.
+   */
+  #buildGuides() {
+    const aimGeo = new THREE.BufferGeometry();
+    aimGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(AIM_POINTS * 3), 3));
+    aimGeo.setDrawRange(0, 0);
+    this.aimLine = new THREE.Line(aimGeo, new THREE.LineDashedMaterial({
+      color: 0xffffff, transparent: true, opacity: 0, dashSize: 0.07, gapSize: 0.05, depthWrite: false,
+    }));
+    this.aimLine.frustumCulled = false;
+    this.scene.add(this.aimLine);
+
+    const ringMat = (color) => new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide,
+    });
+    this.landingRing = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.17, 32), ringMat(0xffe27a));
+    this.landingRing.rotation.x = -Math.PI / 2;
+    this.landingRing.position.y = 0.025;
+    this.scene.add(this.landingRing);
+
+    this.reachRing = new THREE.Mesh(new THREE.RingGeometry(PLAYER_REACH - 0.025, PLAYER_REACH, 48), ringMat(0x7cf0ff));
+    this.reachRing.rotation.x = -Math.PI / 2;
+    this.reachRing.position.y = 0.02;
+    this.scene.add(this.reachRing);
+    this._aim = null;
+    this._aimAlpha = 1;
+  }
+
+  /** Show (or with null hide) the aim preview. `alpha` fades it out as difficulty rises. */
+  setAim(aim, alpha = 1) {
+    this._aim = aim;
+    this._aimAlpha = alpha;
+  }
+
+  #updateGuides(game, dt) {
+    const b = game.ball;
+    const live = game.state === 'PLAYING';
+    const kickable = live && b.y <= 1.15 && Math.abs(b.x - game.playerX) <= PLAYER_REACH;
+
+    this.reachRing.visible = game.state !== 'GAME_OVER';
+    this.reachRing.position.x = game.playerX;
+    this.reachRing.position.z = BALL_FORWARD;
+    this.reachRing.material.opacity = kickable ? 0.85 : 0.22;
+    this.reachRing.material.color.setHex(kickable ? 0x7cffb0 : 0x7cf0ff);
+
+    this.landingRing.visible = live && b.vy !== 0;
+    if (this.landingRing.visible) {
+      this.landingRing.position.x = game.predictContactX(0.11);
+      this.landingRing.position.z = b.z + BALL_FORWARD;
+      // Shrinks as the ball gets low, so it reads as "arriving".
+      const k = THREE.MathUtils.clamp(b.y / 2.4, 0.5, 1.4);
+      this.landingRing.scale.setScalar(k);
+    }
+
+    const showAim = this._aim && live && this._aimAlpha > 0.02;
+    if (showAim) {
+      const n = game.previewPath(this._aim, this._aimBuf, AIM_POINTS);
+      const attr = this.aimLine.geometry.getAttribute('position');
+      attr.array.set(this._aimBuf.subarray(0, n * 3));
+      for (let i = 0; i < n; i += 1) attr.array[i * 3 + 2] += BALL_FORWARD;
+      attr.needsUpdate = true;
+      this.aimLine.geometry.setDrawRange(0, n);
+      this.aimLine.computeLineDistances();
+      this.aimLine.material.opacity = 0.75 * this._aimAlpha;
+    } else {
+      this.aimLine.material.opacity = 0;
+      this.aimLine.geometry.setDrawRange(0, 0);
+    }
+
+    // The character shuffles under the ball and leans into the run.
+    this.player.group.position.x = PLAYER_BASE_X + game.playerX;
+    const vel = dt > 0 ? (game.playerX - this._prevPlayerX) / dt : 0;
+    this._prevPlayerX = game.playerX;
+    this._lean += (THREE.MathUtils.clamp(-vel * 0.05, -0.16, 0.16) - this._lean) * Math.min(1, dt * 10);
+    this.player.group.rotation.z = this._lean;
+  }
+
   /** World-space point the boot should meet, for a given ball body. */
   contactPoint(body, out = this._contact) {
     return out.set(body.x, Math.max(0.14, body.y), body.z + BALL_FORWARD);
@@ -258,6 +346,7 @@ export class Stage {
     this._ballWorld.set(b.x, b.y, b.z + BALL_FORWARD);
     this.player.lookAt(this._ballWorld, playing ? 1 : 0.25);
 
+    this.#updateGuides(game, dt);
     this.player.update(dt);
 
     this.elapsed += dt;
@@ -265,17 +354,24 @@ export class Stage {
     this.gravity = game.tuning.gravity;
     this.fx.update(dt, this.gravity);
 
-    // Camera shake is applied as an offset from the fixed rig position, so it
-    // always decays back to exactly the framing we designed.
+    // The camera slides after the character (about half as far, so the pitch still reads as
+    // a place) — the play area is wider than a portrait phone can show at this zoom.
+    // Shake is layered on top as an offset, so it always decays back to the framing.
+    const followTarget = game.playerX * 0.65;
+    this._follow += (followTarget - this._follow) * Math.min(1, dt * 6);
+    this._camPos.copy(this.cameraBase);
+    this._camPos.x += this._follow;
+    this._lookAt.copy(this.cameraTarget);
+    this._lookAt.x += this._follow;
     if (this.shake.update(dt)) {
-      this._camPos.copy(this.cameraBase).add(this.shake.offset);
-      this._lookAt.copy(this.cameraTarget).addScaledVector(this.shake.offset, 0.35);
+      this._camPos.add(this.shake.offset);
+      this._lookAt.addScaledVector(this.shake.offset, 0.35);
       this.camera.position.copy(this._camPos);
       this.camera.lookAt(this._lookAt);
       this.camera.rotateZ(this.shake.roll);
-    } else if (!this.camera.position.equals(this.cameraBase)) {
-      this.camera.position.copy(this.cameraBase);
-      this.camera.lookAt(this.cameraTarget);
+    } else {
+      this.camera.position.copy(this._camPos);
+      this.camera.lookAt(this._lookAt);
     }
 
     // Rack focus onto the ball so it is never the thing that goes soft.

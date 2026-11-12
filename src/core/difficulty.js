@@ -3,11 +3,15 @@
  * interpolated towards over a short ramp so the step never feels like a jolt —
  * but the deltas are large enough to be obvious within a rally or two.
  */
+// `wind` is the peak sideways acceleration (m/s²) on the ball. It replaces the old random
+// scatter and auto-centring: the ball is never perfectly still, but the push is
+// predictable and the player can lean against it.
+// `kickPower` only scales the swipe's launch speed so apex height stays comparable as gravity rises.
 export const TIERS = [
-  { at: 0, name: 'WARM-UP', gravity: 9.81, drag: 0.16, kickPower: 5.10, lateral: 0.28, recentre: 1.35 },
-  { at: 10, name: 'MATCH PACE', gravity: 11.6, drag: 0.14, kickPower: 5.35, lateral: 0.44, recentre: 1.25 },
-  { at: 20, name: 'PRO', gravity: 13.9, drag: 0.12, kickPower: 5.62, lateral: 0.62, recentre: 1.12 },
-  { at: 50, name: 'WORLD CLASS', gravity: 17.2, drag: 0.10, kickPower: 5.95, lateral: 0.86, recentre: 0.98 },
+  { at: 0, name: 'WARM-UP', gravity: 9.81, drag: 0.16, kickPower: 5.10, wind: 0 },
+  { at: 10, name: 'MATCH PACE', gravity: 11.6, drag: 0.14, kickPower: 5.35, wind: 0.7 },
+  { at: 20, name: 'PRO', gravity: 13.9, drag: 0.12, kickPower: 5.62, wind: 1.3 },
+  { at: 50, name: 'WORLD CLASS', gravity: 17.2, drag: 0.10, kickPower: 5.95, wind: 2.0 },
 ];
 
 export const RAMP_KICKS = 3;
@@ -21,7 +25,7 @@ export function tierIndexFor(score) {
   return idx;
 }
 
-const LERP_KEYS = ['gravity', 'drag', 'kickPower', 'lateral', 'recentre'];
+const LERP_KEYS = ['gravity', 'drag', 'kickPower', 'wind'];
 
 /**
  * Blend between the previous tier and the active one across `RAMP_KICKS`
