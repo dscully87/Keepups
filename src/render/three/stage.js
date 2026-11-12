@@ -48,6 +48,7 @@ export class Stage {
     this.cameraBase = new THREE.Vector3(1.25, 1.34, 3.75);
 
     this.#buildLights();
+    this.#buildEnvironment();
     this.#buildGround();
 
     this.ball = createBall();
@@ -85,7 +86,7 @@ export class Stage {
     // A floodlit pitch is a huge lit green reflector, so the fill from below is
     // strong; at the old 0.26 anything facing down (the underside of the jaw)
     // went to black and read as a chinstrap beard.
-    const hemi = new THREE.HemisphereLight(0x9bb8ff, 0x56704a, 0.62);
+    const hemi = new THREE.HemisphereLight(0x9bb8ff, 0x56704a, 0.34);
     this.scene.add(hemi);
     this.hemi = hemi;
 
@@ -111,6 +112,7 @@ export class Stage {
         light.shadow.camera.bottom = -1;
         light.shadow.bias = -0.0009;
         light.shadow.normalBias = 0.022;
+        light.shadow.radius = 3.5;
         this.key = light;
       }
       this.scene.add(light, light.target);
@@ -123,6 +125,49 @@ export class Stage {
     bounce.target.position.set(0, 0.9, 0);
     this.scene.add(bounce, bounce.target);
     this.bounce = bounce;
+  }
+
+  /**
+   * Image-based lighting, built from a stand-in for the stadium itself: a dark
+   * sky, four bright floodlight banks, lit stands and a green floor. Direct
+   * lights alone leave anything turned away from all four of them at the
+   * mercy of one flat hemisphere term, which is why shadowed skin went to a
+   * dead black. A prefiltered environment gives every surface a plausible
+   * answer for "what is over there", and gives skin and boots something to
+   * reflect. Rendered once at load into a small cube map.
+   */
+  #buildEnvironment() {
+    const env = new THREE.Scene();
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(40, 24, 12),
+      new THREE.MeshBasicMaterial({ color: 0x0b1226, side: THREE.BackSide }),
+    );
+    env.add(sky);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 24), new THREE.MeshBasicMaterial({ color: 0x2f6a34 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -1.2;
+    env.add(floor);
+    // Stands: a lit band right round the horizon.
+    const stands = new THREE.Mesh(
+      new THREE.CylinderGeometry(30, 30, 9, 32, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x3a4258, side: THREE.BackSide }),
+    );
+    stands.position.y = 4;
+    env.add(stands);
+    for (const light of this.floods) {
+      const bank = new THREE.Mesh(
+        new THREE.PlaneGeometry(9, 5),
+        new THREE.MeshBasicMaterial({ color: light.color.clone().multiplyScalar(5.5 * light.intensity), side: THREE.DoubleSide }),
+      );
+      bank.position.copy(light.position).multiplyScalar(2.6);
+      bank.lookAt(0, 1, 0);
+      env.add(bank);
+    }
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(env, 0.04, 0.1, 100).texture;
+    this.scene.environmentIntensity = 0.55;
+    pmrem.dispose();
+    env.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
   }
 
   #buildGround() {
@@ -209,6 +254,9 @@ export class Stage {
       reach = reach * reach * (3 - 2 * reach); // smoothstep
     }
     this.player.setTrack(this.contactPoint(b), reach * this.player.MAX_TRACK);
+    // A juggler never takes their eyes off the ball.
+    this._ballWorld.set(b.x, b.y, b.z + BALL_FORWARD);
+    this.player.lookAt(this._ballWorld, playing ? 1 : 0.25);
 
     this.player.update(dt);
 

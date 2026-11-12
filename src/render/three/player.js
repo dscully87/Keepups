@@ -548,8 +548,8 @@ export class PlayerRig {
     // weights cross — which shows up as limbs snapping into a T-pose.
     this.clips = {
       idle: idleClip,
-      kick: completeClip(buildKickClip(), rest),
-      stumble: completeClip(buildStumbleClip(), rest),
+      kick: completeClip(buildKickClip(), rest, 'end'),
+      stumble: completeClip(buildStumbleClip(), rest, 'start'),
     };
 
     this.idle = this.mixer.clipAction(this.clips.idle);
@@ -594,6 +594,12 @@ export class PlayerRig {
     /** How strongly the boot may shadow the ball before contact. */
     this.MAX_TRACK = 0.85;
 
+    /** Where the eyes are going, and the smoothed head angles that follow. */
+    this.gaze = new THREE.Vector3(0, 1.2, 1);
+    this.gazeWeight = 0;
+    this.headYaw = 0;
+    this.headPitch = 0;
+
     this._v = { a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), d: new THREE.Vector3() };
     this._q = new THREE.Quaternion();
   }
@@ -634,6 +640,8 @@ export class PlayerRig {
     this.ikWeight = 0;
     this.ikDecay = 0;
     this.trackWeight = 0;
+    this.headYaw = 0;
+    this.headPitch = 0;
   }
 
   update(dt) {
@@ -651,6 +659,13 @@ export class PlayerRig {
     this.kick.setEffectiveWeight(kickW);
     this.idle.setEffectiveWeight(Math.max(0, 1 - kickW - stumbleW));
 
+    // The mixer only writes a bone when its blended value changes, so a bone
+    // on a constant track keeps whatever was last put there. Hand the neck and
+    // head back as the mixer left them, or the gaze offset compounds.
+    if (this._preGaze) {
+      this.bones.get('neck').quaternion.copy(this._preGaze[0]);
+      this.bones.get('head').quaternion.copy(this._preGaze[1]);
+    }
     this.mixer.update(dt);
 
     // The strike layer decays over the follow-through so the mixer's authored
@@ -663,6 +678,48 @@ export class PlayerRig {
     const solveTarget = strikeW >= trackW ? this.ikTarget : this.trackTarget;
     this.ikWeight = Math.max(strikeW, trackW) * (1 - stumbleW);
     if (this.ikWeight > 0.001) this.#applyLegIK(this.ikWeight, solveTarget);
+    this.#applyGaze(dt, 1 - stumbleW);
+  }
+
+  /** Point of interest for the head, in world space; weight 0 leaves the clip alone. */
+  lookAt(target, weight = 1) {
+    this.gaze.copy(target);
+    this.gazeWeight = weight;
+  }
+
+  /**
+   * Head tracking, layered over whatever the clips did. The turn is shared
+   * between the neck and the head, limited to what a neck can do, and eased —
+   * eyes lead, the head follows a beat later — so a ball leaving the boot at
+   * speed pulls the chin up rather than snapping it.
+   */
+  #applyGaze(dt, weight) {
+    const neck = this.bones.get('neck');
+    const head = this.bones.get('head');
+    const chest = this.bones.get('chest');
+    chest.updateWorldMatrix(true, false);
+    const from = head.getWorldPosition(this._v.a);
+    const dir = this._v.b.subVectors(this.gaze, from);
+    // Into the chest's frame, so the limits are relative to the shoulders.
+    dir.applyQuaternion(chest.getWorldQuaternion(this._q).invert());
+    const flat = Math.hypot(dir.x, dir.z);
+    const len = Math.hypot(flat, dir.y) || 1;
+    const w = weight * this.gazeWeight;
+    // A ball straight overhead has no meaningful bearing, so the turn fades
+    // out as the target climbs; and a neck only extends about 30 degrees —
+    // past that it is the eyes that roll up, not the skull that tips back.
+    const yaw = THREE.MathUtils.clamp(Math.atan2(dir.x, Math.max(dir.z, 0.15)), -0.6, 0.6) * (flat / len) * w;
+    const pitch = THREE.MathUtils.clamp(Math.atan2(dir.y, Math.max(flat, 0.15)), -0.75, 0.62) * w;
+    if (!this._preGaze) this._preGaze = [new THREE.Quaternion(), new THREE.Quaternion()];
+    this._preGaze[0].copy(neck.quaternion);
+    this._preGaze[1].copy(head.quaternion);
+    const k = 1 - Math.exp(-dt / 0.085);
+    this.headYaw += (yaw - this.headYaw) * k;
+    this.headPitch += (pitch - this.headPitch) * k;
+    const e = new THREE.Euler();
+    // Looking up is a negative rotation about x in this rig.
+    neck.quaternion.multiply(this._q.setFromEuler(e.set(-this.headPitch * 0.36, this.headYaw * 0.40, 0, 'YXZ')));
+    head.quaternion.multiply(this._q.setFromEuler(e.set(-this.headPitch * 0.48, this.headYaw * 0.55, 0, 'YXZ')));
   }
 
   /**
@@ -1105,6 +1162,19 @@ function skullPoint(nx, ny, nz, out) {
   const front = smootherstep(0.20, 1.0, nz);
   pz *= 1 - 0.090 * front;
 
+  // Round 5: a face is a plane, and a sphere is not. From the brow to the
+  // chin the front of a real skull is close to vertical, then turns sharply
+  // under at the jaw. On a sphere the mouth and chin already face 30-40° down,
+  // so with every flood overhead they sat in permanent half-shadow and the
+  // whole lower face read as a dark beard. Pull the lower front out to a
+  // near-vertical plane; the turn-under that results is the jawline.
+  if (ny < 0.1 && nz > 0) {
+    const down = smootherstep(0.1, -0.55, ny);
+    const facing = smootherstep(0.30, 0.80, nz / Math.max(Math.hypot(nx, nz), 1e-4)) * smootherstep(-0.98, -0.72, ny);
+    const plane = SKULL[2] * (0.915 - 0.050 * down);
+    pz += Math.max(0, plane - pz) * down * facing;
+  }
+
   // Everything below the eyes gets pushed forward in proportion to how far
   // down it is. This is the single most important line in the file for how the
   // head *lights*: every flood is 45° up, so a face that curves under below
@@ -1466,9 +1536,13 @@ function buildIdleClip() {
   const t = [0, 0.6, 1.2, 1.8, 2.4];
   const tracks = [
     track('hips', t, [[2, 3, 0], [1, -2, 1.5], [2, -4, 0], [1, 1, -1.5], [2, 3, 0]]),
-    track('spine', t, [[-1, -2, 0], [0, 1, -1], [-1, 3, 0], [0, -1, 1], [-1, -2, 0]]),
-    track('chest', t, [[-2, -3, 0], [-3, 2, 1], [-2, 4, 0], [-3, -1, -1], [-2, -3, 0]]),
-    track('head', t, [[6, 2, 0], [7, -2, 0], [8, -3, 0], [7, 1, 0], [6, 2, 0]]),
+    // A ready stance, not a parade stance: weight forward over the balls of
+    // the feet, a slight crouch through the spine. The head carries no pose of
+    // its own here — the gaze layer owns it.
+    track('spine', t, [[3, -2, 0], [4, 1, -1], [3, 3, 0], [4, -1, 1], [3, -2, 0]]),
+    track('chest', t, [[5, -3, 0], [4, 2, 1], [6, 4, 0], [4, -1, -1], [5, -3, 0]]),
+    track('neck', t, [[-3, 0, 0], [-3, 0, 0], [-3, 0, 0], [-3, 0, 0], [-3, 0, 0]]),
+    track('head', t, [[0, 1, 0], [0, -1, 0], [1, -1, 0], [0, 1, 0], [0, 1, 0]]),
 
     // Arms already hang in the bind pose. Positive Z flares the +x arm
     // outward, negative X bends either elbow forward.
@@ -1479,20 +1553,25 @@ function buildIdleClip() {
     // ribs and carries the load in a bent elbow, so the flare comes almost
     // all the way off and the forearms angle back *inward* (negative Z on the
     // +x side) to bring the hands in beside the hips.
-    track('clavL', t, [[0, 0, -3], [0, 0, -2], [0, 0, -4], [0, 0, -2], [0, 0, -3]]),
-    track('armL', t, [[-4, 0, 3], [-6, 0, 5], [-2, 0, 2], [-5, 0, 4], [-4, 0, 3]]),
-    track('foreL', t, [[-24, 0, -3], [-28, 0, -4], [-21, 0, -2], [-27, 0, -4], [-24, 0, -3]]),
-    track('clavR', t, [[0, 0, 3], [0, 0, 2], [0, 0, 4], [0, 0, 2], [0, 0, 3]]),
-    track('armR', t, [[-4, 0, -3], [-6, 0, -5], [-2, 0, -2], [-5, 0, -4], [-4, 0, -3]]),
-    track('foreR', t, [[-24, 0, 3], [-28, 0, 4], [-21, 0, 2], [-27, 0, 4], [-24, 0, 3]]),
+    //
+    // Round 5: that was right for someone standing still and wrong for someone
+    // juggling. The arms are the balance pole — carried out from the body and
+    // working against each other as the weight shifts, elbows well bent.
+    track('clavL', t, [[0, 0, -2], [0, 0, -1], [0, 0, -3], [0, 0, -1], [0, 0, -2]]),
+    track('armL', t, [[6, 0, 15], [1, 0, 19], [10, 0, 12], [3, 0, 17], [6, 0, 15]]),
+    track('foreL', t, [[-48, 0, -6], [-55, 0, -8], [-42, 0, -5], [-52, 0, -7], [-48, 0, -6]]),
+    track('clavR', t, [[0, 0, 2], [0, 0, 1], [0, 0, 3], [0, 0, 1], [0, 0, 2]]),
+    track('armR', t, [[-10, 0, -17], [-4, 0, -13], [-13, 0, -20], [-6, 0, -15], [-10, 0, -17]]),
+    track('foreR', t, [[-38, 0, 5], [-32, 0, 4], [-44, 0, 6], [-35, 0, 5], [-38, 0, 5]]),
 
     // Kicking leg stays loaded — knee soft, foot just off the turf.
     track('thighL', t, [[-16, 0, -3], [-13, 0, -3], [-18, 0, -4], [-14, 0, -3], [-16, 0, -3]]),
     track('shinL', t, [[26, 0, 0], [22, 0, 0], [29, 0, 0], [23, 0, 0], [26, 0, 0]]),
     track('footL', t, [[-8, 0, 0], [-6, 0, 0], [-10, 0, 0], [-7, 0, 0], [-8, 0, 0]]),
     // Standing leg takes the weight.
-    track('thighR', t, [[-3, 0, 2], [-5, 0, 2], [-2, 0, 3], [-5, 0, 2], [-3, 0, 2]]),
-    track('shinR', t, [[6, 0, 0], [9, 0, 0], [4, 0, 0], [9, 0, 0], [6, 0, 0]]),
+    track('thighR', t, [[-9, 0, 2], [-11, 0, 2], [-8, 0, 3], [-11, 0, 2], [-9, 0, 2]]),
+    track('shinR', t, [[15, 0, 0], [18, 0, 0], [13, 0, 0], [18, 0, 0], [15, 0, 0]]),
+    track('footR', t, [[-6, 0, 0], [-7, 0, 0], [-5, 0, 0], [-7, 0, 0], [-6, 0, 0]]),
   ];
   return new THREE.AnimationClip('idle', 2.4, tracks);
 }
@@ -1508,7 +1587,7 @@ function buildKickClip() {
     track('hips', t, [[-4, 4, 0], [-7, 6, 0], [-4, 5, 0], [0, 3, 0], [2, 3, 0]]),
     track('spine', t, [[5, -3, 0], [8, -5, 0], [5, -4, 0], [1, -2, 0], [-1, -2, 0]]),
     track('chest', t, [[6, -5, 0], [10, -8, 0], [6, -6, 0], [0, -3, 0], [-2, -3, 0]]),
-    track('head', t, [[10, 0, 0], [12, 0, 0], [10, 0, 0], [7, 1, 0], [6, 2, 0]]),
+    track('head', t, [[2, 0, 0], [3, 0, 0], [2, 0, 0], [1, 1, 0], [0, 1, 0]]),
 
     // The arm opposite the kicking leg drives forward and up; the near arm
     // swings back and out for balance.
@@ -1558,7 +1637,16 @@ function restPoseFrom(clip) {
  * Pads `clip` with constant tracks for every bone in the rest pose it does not
  * already animate, so all clips share one blend set.
  */
-function completeClip(clip, rest) {
+function completeClip(clip, rest, pin) {
+  // The kick ends on the rest pose and the stumble starts from it. Writing
+  // that in rather than keeping two hand-copied sets of numbers in step means
+  // the idle can be re-posed without the hand-back popping.
+  for (const t of clip.tracks) {
+    const q = rest.get(t.name);
+    if (!q || !pin) continue;
+    const at = pin === 'end' ? t.values.length - 4 : 0;
+    for (let i = 0; i < 4; i += 1) t.values[at + i] = q[i];
+  }
   const present = new Set(clip.tracks.map((t) => t.name));
   for (const [name, q] of rest) {
     if (present.has(name)) continue;

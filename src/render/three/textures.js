@@ -174,7 +174,7 @@ export function makeBallTextures(size = 1024) {
 // --- kit ---------------------------------------------------------------
 
 export const KIT = {
-  white: '#eef0f4',
+  white: '#e4e6ec',
   navy: '#17275c',
   coral: '#ff5a4f',
   number: '10',
